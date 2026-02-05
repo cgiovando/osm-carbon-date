@@ -720,18 +720,28 @@
 
     /**
      * Update zoom warning visibility
+     * Three states: below display (<10), display-only (10-11), fetch enabled (12+)
      */
     function updateZoomWarning() {
         const zoom = map.getZoom();
         const minDisplay = CONFIG.map.minZoomForImageryDisplay;
+        const minFetch = CONFIG.map.minZoomForImageryFetch;
 
-        if (zoom >= minDisplay) {
-            // At display level - imagery is being loaded, no warning needed
+        if (zoom >= minFetch) {
+            // At fetch level (12+) - can load new imagery, no warning needed
             zoomWarning.classList.add('hidden');
-        } else {
-            // Below display level
+        } else if (zoom >= minDisplay) {
+            // Between display and fetch (10-11) - show cached data only
             zoomWarning.classList.remove('hidden');
-            zoomWarning.textContent = `Zoom to ${minDisplay}+ to view imagery metadata (current: ${Math.floor(zoom)})`;
+            if (imageryFeatures.length > 0) {
+                zoomWarning.textContent = `Showing cached imagery. Zoom to ${minFetch}+ to load more.`;
+            } else {
+                zoomWarning.textContent = `Zoom to ${minFetch}+ to load imagery metadata`;
+            }
+        } else {
+            // Below display level (<10)
+            zoomWarning.classList.remove('hidden');
+            zoomWarning.textContent = `Zoom to ${minDisplay}+ to view imagery metadata`;
         }
 
         // Also update project layer visibility
