@@ -6,6 +6,9 @@
 
 **[View the app →](https://cgiovando.github.io/osm-carbon-date/)**
 
+![Example showing TM project #38583 in Brazil with imagery tiles color-coded by age](images/example-brazil.jpg)
+*Example: TM Project #38583 in Ceará, Brazil — imagery tiles are color-coded from green (recent) to red (old), with the project boundary shown as a dashed white line.*
+
 ## The Problem
 
 When creating map data in OpenStreetMap through Tasking Manager projects, we often don't know how current the source imagery is. This leads to:
