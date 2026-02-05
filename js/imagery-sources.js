@@ -67,130 +67,123 @@ const ImagerySource = {
     },
 
     /**
-     * Convert lat/lon to Web Mercator (EPSG:3857)
-     */
-    toWebMercator(lon, lat) {
-        const x = lon * 20037508.34 / 180;
-        let y = Math.log(Math.tan((90 + lat) * Math.PI / 360)) / (Math.PI / 180);
-        y = y * 20037508.34 / 180;
-        return [x, y];
-    },
-
-    /**
-     * Convert Web Mercator to lat/lon
-     */
-    fromWebMercator(x, y) {
-        const lon = x * 180 / 20037508.34;
-        const lat = (Math.atan(Math.exp(y * Math.PI / 20037508.34)) * 360 / Math.PI) - 90;
-        return [lon, lat];
-    },
-
-    /**
-     * Fetch ESRI imagery metadata using the query endpoint
-     * Uses CORS proxy since query endpoint doesn't have CORS headers
+     * Fetch ESRI imagery metadata using the identify endpoint
+     * Uses multiple sample points to get coverage across the viewport
      * @param {Array} bounds - [west, south, east, north] in EPSG:4326
      * @param {number} zoom - current zoom level
      * @returns {Promise<Object>} GeoJSON FeatureCollection with date info
      */
     async fetchEsriMetadata(bounds, zoom) {
-        // Convert to Web Mercator (EPSG:3857) for ESRI API
-        const [minX, minY] = this.toWebMercator(bounds[0], bounds[1]);
-        const [maxX, maxY] = this.toWebMercator(bounds[2], bounds[3]);
+        const [west, south, east, north] = bounds;
 
-        // Build query - first get count to avoid loading too many features
-        const baseParams = {
-            f: 'json',
-            geometryType: 'esriGeometryEnvelope',
-            geometry: JSON.stringify({
-                xmin: minX, ymin: minY, xmax: maxX, ymax: maxY,
-                spatialReference: { wkid: 102100 }
-            }),
-            spatialRel: 'esriSpatialRelIntersects',
-            inSR: 102100,
-            outSR: 4326 // Return geometry in lat/lon for MapLibre
-        };
+        // Create a grid of sample points across the viewport
+        // More points at higher zoom, fewer at lower zoom
+        const gridSize = zoom >= 14 ? 3 : 2;
+        const points = [];
+
+        for (let i = 0; i < gridSize; i++) {
+            for (let j = 0; j < gridSize; j++) {
+                const lon = west + (east - west) * (i + 0.5) / gridSize;
+                const lat = south + (north - south) * (j + 0.5) / gridSize;
+                points.push([lon, lat]);
+            }
+        }
+
+        // Fetch metadata for each sample point in parallel
+        const allFeatures = [];
+        const seenIds = new Set();
 
         try {
-            // First, get count to ensure we don't overload
-            const countParams = new URLSearchParams({
-                ...baseParams,
-                returnCountOnly: 'true'
-            });
+            const results = await Promise.all(
+                points.map(([lon, lat]) => this.fetchIdentifyPoint(lon, lat, bounds))
+            );
 
-            const countUrl = `${CONFIG.esri.corsProxy}${encodeURIComponent(CONFIG.esri.queryUrl + '?' + countParams)}`;
-            const countResponse = await fetch(countUrl);
-            const countData = await countResponse.json();
-
-            if (countData.count > 200) {
-                console.log(`Too many features (${countData.count}), zoom in more`);
-                return {
-                    type: 'FeatureCollection',
-                    features: [],
-                    warning: `Too many imagery tiles (${countData.count}). Zoom in for details.`
-                };
+            // Combine results, deduplicating by OBJECTID
+            for (const result of results) {
+                if (result.features) {
+                    for (const feature of result.features) {
+                        const id = feature.properties.OBJECTID;
+                        if (!seenIds.has(id)) {
+                            seenIds.add(id);
+                            allFeatures.push(feature);
+                        }
+                    }
+                }
             }
 
-            // Get all features with geometry
-            const queryParams = new URLSearchParams({
-                ...baseParams,
-                outFields: 'OBJECTID,SRC_DATE,SRC_RES,SRC_ACC,NICE_NAME,NICE_DESC',
-                returnGeometry: 'true'
-            });
+            return {
+                type: 'FeatureCollection',
+                features: allFeatures
+            };
+        } catch (error) {
+            console.error('Error fetching ESRI metadata:', error);
+            return { error: 'fetch', message: error.message };
+        }
+    },
 
-            const queryUrl = `${CONFIG.esri.corsProxy}${encodeURIComponent(CONFIG.esri.queryUrl + '?' + queryParams)}`;
-            const response = await fetch(queryUrl);
+    /**
+     * Fetch identify results for a single point
+     */
+    async fetchIdentifyPoint(lon, lat, bounds) {
+        const [west, south, east, north] = bounds;
 
+        const params = new URLSearchParams({
+            f: 'json',
+            geometryType: 'esriGeometryPoint',
+            geometry: `${lon},${lat}`,
+            sr: '4326',
+            mapExtent: `${west},${south},${east},${north}`,
+            imageDisplay: '512,512,96',
+            tolerance: '10',
+            layers: 'visible:0',
+            returnGeometry: 'true'
+        });
+
+        const url = `${CONFIG.esri.identifyUrl}?${params}`;
+
+        try {
+            const response = await fetch(url);
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}`);
             }
 
             const data = await response.json();
 
-            if (data.error) {
-                throw new Error(data.error.message || 'ESRI API error');
-            }
+            // Convert results to GeoJSON features
+            const features = (data.results || [])
+                .filter(r => r.geometry && r.geometry.rings)
+                .map(r => {
+                    const srcDate = r.attributes?.SRC_DATE;
+                    const parsedDate = this.parseEsriDate(srcDate);
 
-            // Convert ESRI features to GeoJSON
-            const features = (data.features || []).map(f => {
-                const srcDate = f.attributes?.SRC_DATE;
-                const parsedDate = this.parseEsriDate(srcDate);
-
-                // Convert ESRI geometry to GeoJSON
-                let geometry = null;
-                if (f.geometry?.rings) {
-                    geometry = {
-                        type: 'Polygon',
-                        coordinates: f.geometry.rings
+                    return {
+                        type: 'Feature',
+                        properties: {
+                            OBJECTID: r.attributes?.OBJECTID,
+                            SRC_DATE: srcDate,
+                            SRC_RES: r.attributes?.SRC_RES,
+                            SRC_ACC: r.attributes?.SRC_ACC,
+                            NICE_NAME: r.attributes?.NICE_NAME,
+                            NICE_DESC: r.attributes?.NICE_DESC,
+                            layerName: r.layerName,
+                            parsedDate: parsedDate,
+                            formattedDate: this.formatDate(parsedDate),
+                            ageYears: this.getAgeInYears(parsedDate),
+                            ageColor: this.getAgeColor(parsedDate),
+                            ageClass: this.getAgeClass(parsedDate),
+                            source: 'ESRI World Imagery'
+                        },
+                        geometry: {
+                            type: 'Polygon',
+                            coordinates: r.geometry.rings
+                        }
                     };
-                }
+                });
 
-                return {
-                    type: 'Feature',
-                    properties: {
-                        OBJECTID: f.attributes?.OBJECTID,
-                        SRC_DATE: srcDate,
-                        SRC_RES: f.attributes?.SRC_RES,
-                        SRC_ACC: f.attributes?.SRC_ACC,
-                        NICE_NAME: f.attributes?.NICE_NAME,
-                        NICE_DESC: f.attributes?.NICE_DESC,
-                        parsedDate: parsedDate,
-                        formattedDate: this.formatDate(parsedDate),
-                        ageYears: this.getAgeInYears(parsedDate),
-                        ageColor: this.getAgeColor(parsedDate),
-                        ageClass: this.getAgeClass(parsedDate),
-                        source: 'ESRI World Imagery'
-                    },
-                    geometry: geometry
-                };
-            }).filter(f => f.geometry !== null);
-
-            return {
-                type: 'FeatureCollection',
-                features: features
-            };
+            return { features };
         } catch (error) {
-            console.error('Error fetching ESRI metadata:', error);
-            return { error: 'fetch', message: error.message };
+            console.error('Error fetching identify point:', error);
+            return { features: [] };
         }
     },
 

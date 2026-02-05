@@ -497,12 +497,6 @@
                 return;
             }
 
-            if (data.warning) {
-                // Show warning in zoom warning element
-                zoomWarning.textContent = data.warning;
-                zoomWarning.classList.remove('hidden');
-            }
-
             if (data.features) {
                 // Add new features that we haven't loaded yet
                 const newFeatures = data.features.filter(f => {
