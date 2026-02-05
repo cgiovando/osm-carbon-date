@@ -65,6 +65,14 @@ ageColors: {
 - 5-minute TTL (`_cacheTimeout: 5 * 60 * 1000`)
 - Cache keys: `projects-{limit}`, `project-{id}`
 
+### TM API Pagination
+
+The TM API has a hard limit of **14 projects per page** regardless of the `perPage` parameter. To fetch 100 projects, `fetchRecentProjects()` iterates through multiple pages:
+```javascript
+const perPage = 14; // API's actual limit
+const pagesToFetch = Math.ceil(limit / perPage); // 8 pages for 100 projects
+```
+
 ## UI Layout
 
 **Left side:**
@@ -73,13 +81,15 @@ ageColors: {
 
 **Right side (vertical stack):**
 - TM Project info panel (top)
-- Map navigation controls
-- Imagery Age legend
-- Imagery Statistics panel (bottom)
+- Imagery Age legend (bottom: 220px)
+- Imagery Statistics panel (bottom: 40px)
+- Attribution control (collapsed by default)
 
 **Center:**
-- Zoom warning (when < zoom 12)
+- Zoom warning (context-aware messages based on zoom level)
 - Imagery loading indicator (red pill)
+
+**Note:** Map navigation controls (zoom +/-) are intentionally removed for cleaner UI.
 
 ## Configuration Defaults
 
@@ -87,10 +97,22 @@ ageColors: {
 map: {
     center: [0, 20],
     zoom: 2,
-    minZoomForImagery: 12,
+    minZoomForImageryFetch: 12,    // ESRI API limit - can't fetch below this
+    minZoomForImageryDisplay: 10,  // Show existing data down to this level
     recentProjectsLimit: 100
 }
 ```
+
+### Two-Threshold Zoom System
+
+The app uses separate thresholds for **fetching** vs **displaying** imagery:
+- **Fetch threshold (12)**: ESRI API's minimum zoom level for data
+- **Display threshold (10)**: Imagery footprints remain visible when zooming out
+
+This lets users see entire project areas with previously loaded footprints, even below ESRI's fetch limit. The `onMapMove()` function in `app.js` handles this with three cases:
+1. Below display (< 10): Clear all imagery
+2. Between display and fetch (10-11): Keep existing, don't fetch
+3. At/above fetch (12+): Fetch new imagery
 
 ## Brand Colors
 
@@ -104,6 +126,24 @@ map: {
 2. **ESRI query endpoint CORS**: Solved with identify endpoint fallback
 3. **Slow public proxies**: Worker proxy is much faster
 4. **Imagery dates showing "Unknown"**: Fixed by using correct field names from identify endpoint
+5. **TM API pagination**: API ignores `perPage` param, limited to 14/page - solved with multi-page fetch
+6. **ESRI zoom limit**: Can't fetch below zoom 12 - solved with two-threshold system (display at 10+)
+
+## Recent Changes (Feb 2026)
+
+### Zoom Display Enhancement
+- Added separate `minZoomForImageryFetch` (12) and `minZoomForImageryDisplay` (10) thresholds
+- Imagery footprints now persist when zooming out from 12 to 10
+- Context-aware zoom warning messages guide users
+
+### Layout Fixes
+- Removed map navigation controls (zoom +/-)
+- Attribution collapsed by default (was expanded)
+- Fixed legend/stats overlap (legend at bottom: 220px, stats at bottom: 40px)
+
+### TM Projects
+- Fixed pagination to actually fetch 100 projects (TM API limits to 14/page)
+- Fetches 8 pages to get full 100 recent projects
 
 ## GitHub Actions
 
