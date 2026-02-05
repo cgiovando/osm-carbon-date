@@ -547,8 +547,11 @@
         updateUrlHash();
 
         const zoom = map.getZoom();
-        if (zoom < CONFIG.map.minZoomForImagery) {
-            // Clear imagery when zoomed out
+        const minDisplay = CONFIG.map.minZoomForImageryDisplay;
+        const minFetch = CONFIG.map.minZoomForImageryFetch;
+
+        // Below display threshold: clear imagery
+        if (zoom < minDisplay) {
             imageryLoading.classList.add('hidden');
             if (imageryFeatures.length > 0) {
                 imageryFeatures = [];
@@ -563,6 +566,14 @@
             return;
         }
 
+        // Between display and fetch threshold: keep existing imagery, don't fetch
+        if (zoom < minFetch) {
+            imageryLoading.classList.add('hidden');
+            // Keep existing imagery visible, just don't fetch new data
+            return;
+        }
+
+        // At or above fetch threshold: fetch new imagery
         const bounds = map.getBounds();
         const boundsArray = [
             bounds.getWest(),
@@ -616,11 +627,24 @@
      */
     function updateZoomWarning() {
         const zoom = map.getZoom();
-        if (zoom >= CONFIG.map.minZoomForImagery) {
+        const minDisplay = CONFIG.map.minZoomForImageryDisplay;
+        const minFetch = CONFIG.map.minZoomForImageryFetch;
+
+        if (zoom >= minFetch) {
+            // At fetch level - no warning needed
             zoomWarning.classList.add('hidden');
-        } else {
+        } else if (zoom >= minDisplay) {
+            // Between display and fetch - show "zoom to load more"
             zoomWarning.classList.remove('hidden');
-            zoomWarning.textContent = `Zoom in to level ${CONFIG.map.minZoomForImagery}+ to load imagery metadata (current: ${Math.floor(zoom)})`;
+            if (imageryFeatures.length > 0) {
+                zoomWarning.textContent = `Zoom to ${minFetch}+ to load more imagery metadata (current: ${Math.floor(zoom)})`;
+            } else {
+                zoomWarning.textContent = `Zoom to ${minFetch}+ to load imagery metadata (current: ${Math.floor(zoom)})`;
+            }
+        } else {
+            // Below display level
+            zoomWarning.classList.remove('hidden');
+            zoomWarning.textContent = `Zoom to ${minDisplay}+ to view imagery metadata (current: ${Math.floor(zoom)})`;
         }
 
         // Also update project layer visibility
