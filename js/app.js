@@ -3,13 +3,18 @@
  */
 
 (function() {
+    // Register PMTiles protocol with MapLibre
+    const protocol = new pmtiles.Protocol();
+    maplibregl.addProtocol('pmtiles', protocol.tile);
+
     // State
     let map;
     let currentProject = null;
     let loadedImageryIds = new Set();
     let imageryFeatures = [];
+    let imageryCentroids = []; // For deduplicated imagery labels
     let recentProjects = [];
-    let recentProjectsGeoJSON = null;
+    let projectCentroids = []; // For deduplicated TM project labels
 
     // DOM elements
     const tmProjectInput = document.getElementById('tm-project-input');
@@ -27,6 +32,34 @@
     const statsContent = document.getElementById('stats-content');
     const recentProjectsList = document.getElementById('recent-projects-list');
     const imageryLoading = document.getElementById('imagery-loading');
+
+    /**
+     * Calculate centroid from a GeoJSON geometry (polygon/multipolygon)
+     * Returns [lng, lat] or null if invalid
+     */
+    function getCentroidFromGeometry(geometry) {
+        if (!geometry || !geometry.coordinates) return null;
+
+        let minLon = Infinity, minLat = Infinity;
+        let maxLon = -Infinity, maxLat = -Infinity;
+
+        const processCoords = (coords) => {
+            if (typeof coords[0] === 'number') {
+                minLon = Math.min(minLon, coords[0]);
+                maxLon = Math.max(maxLon, coords[0]);
+                minLat = Math.min(minLat, coords[1]);
+                maxLat = Math.max(maxLat, coords[1]);
+            } else {
+                coords.forEach(processCoords);
+            }
+        };
+
+        processCoords(geometry.coordinates);
+
+        if (!isFinite(minLon) || !isFinite(minLat)) return null;
+
+        return [(minLon + maxLon) / 2, (minLat + maxLat) / 2];
+    }
 
     /**
      * Initialize the map
@@ -87,6 +120,8 @@
             setupEventListeners();
             checkUrlParams();
             loadRecentProjects();
+            loadAllProjectCentroids(); // Load ALL centroids for deduplicated labels
+            onMapMove(); // Initial load of imagery metadata
         });
 
         map.on('moveend', onMapMove);
@@ -140,12 +175,25 @@
             data: { type: 'FeatureCollection', features: [] }
         });
 
+        // GeoJSON source for imagery label centroids (one per tile, avoids multi-polygon duplication)
+        map.addSource('imagery-centroids', {
+            type: 'geojson',
+            data: { type: 'FeatureCollection', features: [] }
+        });
+
         map.addSource('tm-project', {
             type: 'geojson',
             data: { type: 'FeatureCollection', features: [] }
         });
 
-        map.addSource('recent-projects', {
+        // PMTiles source for all TM project geometries (efficient rendering)
+        map.addSource('tm-projects-pmtiles', {
+            type: 'vector',
+            url: `pmtiles://${CONFIG.tmApi.s3Base}/projects.pmtiles`
+        });
+
+        // GeoJSON source for project label centroids (one per project, avoids multi-polygon duplication)
+        map.addSource('project-centroids', {
             type: 'geojson',
             data: { type: 'FeatureCollection', features: [] }
         });
@@ -155,31 +203,46 @@
      * Add map layers
      */
     function addMapLayers() {
-        // Recent projects as circles (centroids) - HOT red
+        // PMTiles layers - project polygons (efficient at all zoom levels)
+        // Fill layer for project areas
         map.addLayer({
-            id: 'recent-projects-circles',
-            type: 'circle',
-            source: 'recent-projects',
+            id: 'pmtiles-projects-fill',
+            type: 'fill',
+            source: 'tm-projects-pmtiles',
+            'source-layer': 'projects',
             paint: {
-                'circle-radius': 8,
-                'circle-color': '#d73f3f',
-                'circle-opacity': 0.9,
-                'circle-stroke-color': '#ffffff',
-                'circle-stroke-width': 2
+                'fill-color': '#d73f3f',
+                'fill-opacity': 0.15
             }
         });
 
-        // Recent projects labels - HOT red
+        // Outline layer for project boundaries
         map.addLayer({
-            id: 'recent-projects-labels',
+            id: 'pmtiles-projects-outline',
+            type: 'line',
+            source: 'tm-projects-pmtiles',
+            'source-layer': 'projects',
+            paint: {
+                'line-color': '#d73f3f',
+                'line-width': 1.5,
+                'line-opacity': 0.8
+            }
+        });
+
+        // Project labels from centroids GeoJSON (one label per project, avoids multi-polygon duplication)
+        map.addLayer({
+            id: 'project-labels',
             type: 'symbol',
-            source: 'recent-projects',
+            source: 'project-centroids',
+            minzoom: 6,
             layout: {
                 'text-field': ['concat', '#', ['get', 'projectId']],
                 'text-font': ['Open Sans Bold'],
                 'text-size': 12,
-                'text-offset': [0, 1.8],
-                'text-anchor': 'top'
+                'symbol-placement': 'point',
+                'text-allow-overlap': false,
+                'text-ignore-placement': false,
+                'text-optional': true
             },
             paint: {
                 'text-color': '#d73f3f',
@@ -211,17 +274,19 @@
             }
         });
 
-        // Imagery date labels (age-based colors with dark outline)
+        // Imagery date labels using centroids (one label per tile, avoids multipolygon duplication)
         map.addLayer({
             id: 'imagery-labels',
             type: 'symbol',
-            source: 'imagery-metadata',
+            source: 'imagery-centroids',
             layout: {
                 'text-field': ['get', 'formattedDate'],
                 'text-font': ['Open Sans Bold'],
                 'text-size': 13,
                 'text-anchor': 'center',
-                'text-allow-overlap': true
+                'text-allow-overlap': false,
+                'text-ignore-placement': false,
+                'text-padding': 5
             },
             paint: {
                 'text-color': ['get', 'ageColor'],
@@ -305,12 +370,12 @@
             map.getCanvas().style.cursor = '';
         });
 
-        // Click on recent projects
-        map.on('click', 'recent-projects-circles', onRecentProjectClick);
-        map.on('mouseenter', 'recent-projects-circles', () => {
+        // Click on PMTiles project polygons
+        map.on('click', 'pmtiles-projects-fill', onPmtilesProjectClick);
+        map.on('mouseenter', 'pmtiles-projects-fill', () => {
             map.getCanvas().style.cursor = 'pointer';
         });
-        map.on('mouseleave', 'recent-projects-circles', () => {
+        map.on('mouseleave', 'pmtiles-projects-fill', () => {
             map.getCanvas().style.cursor = '';
         });
 
@@ -337,22 +402,64 @@
     }
 
     /**
-     * Load recent TM projects
+     * Load recent TM projects for sidebar list
      */
     async function loadRecentProjects() {
         console.log('Loading recent TM projects...');
         try {
             const limit = CONFIG.map.recentProjectsLimit || 100;
             const data = await TmApi.fetchRecentProjects(limit);
-            console.log('Received data:', data);
             recentProjects = data.projects || [];
-            recentProjectsGeoJSON = data.mapResults || { type: 'FeatureCollection', features: [] };
-            console.log('Projects:', recentProjects.length, 'Map features:', recentProjectsGeoJSON.features?.length);
+            console.log(`Loaded ${recentProjects.length} projects for sidebar`);
             renderRecentProjectsList();
-            renderRecentProjectsOnMap();
         } catch (error) {
             console.error('Error loading recent projects:', error);
             recentProjectsList.innerHTML = '<div class="loading-text">Error loading projects</div>';
+        }
+    }
+
+    /**
+     * Load ALL project centroids from the full GeoJSON file
+     * This ensures deduplicated labels (one per project) for all projects, not just recent 100
+     */
+    async function loadAllProjectCentroids() {
+        console.log('Loading all project centroids for labels...');
+        try {
+            const url = `${CONFIG.tmApi.s3Base}/all_projects.geojson`;
+            const response = await fetch(url);
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            const geojson = await response.json();
+
+            if (geojson.features && geojson.features.length > 0) {
+                projectCentroids = geojson.features
+                    .map(f => {
+                        const centroid = getCentroidFromGeometry(f.geometry);
+                        if (!centroid) return null;
+                        return {
+                            type: 'Feature',
+                            geometry: {
+                                type: 'Point',
+                                coordinates: centroid
+                            },
+                            properties: {
+                                projectId: f.properties.projectId,
+                                name: f.properties.name
+                            }
+                        };
+                    })
+                    .filter(f => f !== null);
+
+                // Update the map source with centroids
+                map.getSource('project-centroids').setData({
+                    type: 'FeatureCollection',
+                    features: projectCentroids
+                });
+                console.log(`Loaded ${projectCentroids.length} project centroids for labels`);
+            }
+        } catch (error) {
+            console.error('Error loading project centroids:', error);
         }
     }
 
@@ -380,89 +487,39 @@
             item.addEventListener('click', () => {
                 const projectId = parseInt(item.dataset.projectId);
 
-                // Find the centroid from mapResults and fly there immediately
-                let didFly = false;
-                if (recentProjectsGeoJSON && recentProjectsGeoJSON.features) {
-                    const feature = recentProjectsGeoJSON.features.find(
-                        f => f.properties.projectId === projectId
-                    );
-                    if (feature && feature.geometry && feature.geometry.coordinates) {
-                        map.flyTo({
-                            center: feature.geometry.coordinates,
-                            zoom: 13,
-                            duration: 1000
-                        });
-                        didFly = true;
-                    }
-                }
-
-                // Then load the full project details (skip fitBounds if we already flew)
+                // Load the project (will fly to bounds)
                 tmProjectInput.value = projectId;
-                loadTmProject({ skipFitBounds: didFly });
+                loadTmProject();
             });
         });
     }
 
     /**
-     * Render recent projects on map using centroid points from mapResults
+     * Render recent projects on map
+     * Note: PMTiles handles the map rendering, this is now just a placeholder
+     * that could be used for any additional GeoJSON overlay if needed
      */
     function renderRecentProjectsOnMap() {
-        console.log('renderRecentProjectsOnMap called');
-        console.log('recentProjectsGeoJSON:', recentProjectsGeoJSON);
-
-        if (!recentProjectsGeoJSON || !recentProjectsGeoJSON.features || recentProjectsGeoJSON.features.length === 0) {
-            console.log('No recent projects GeoJSON to render');
-            return;
-        }
-
-        // The mapResults contains Point features with projectId in properties
-        // Enhance them with project names from the results array
-        const projectMap = new Map(recentProjects.map(p => [p.projectId, p]));
-
-        const features = recentProjectsGeoJSON.features.map(f => {
-            const project = projectMap.get(f.properties.projectId);
-            return {
-                ...f,
-                properties: {
-                    ...f.properties,
-                    name: project?.name || `Project #${f.properties.projectId}`,
-                    status: project?.status || 'Unknown'
-                }
-            };
-        });
-
-        console.log('Setting map source with features:', features.length);
-        console.log('First feature:', features[0]);
-
-        map.getSource('recent-projects').setData({
-            type: 'FeatureCollection',
-            features: features
-        });
-
-        console.log(`Rendered ${features.length} recent project markers on map`);
+        // PMTiles source handles rendering of all project geometries
+        // No additional GeoJSON source needed
+        console.log('Recent projects will be displayed via PMTiles');
     }
 
     /**
-     * Handle click on recent project on map
+     * Handle click on PMTiles project polygon
      */
-    function onRecentProjectClick(e) {
+    function onPmtilesProjectClick(e) {
         if (!e.features || e.features.length === 0) return;
 
         const feature = e.features[0];
         const props = feature.properties;
 
-        // Immediately fly to the clicked point
-        if (feature.geometry && feature.geometry.coordinates) {
-            map.flyTo({
-                center: feature.geometry.coordinates,
-                zoom: 13,
-                duration: 1000
-            });
+        // PMTiles features have projectId in properties
+        const projectId = props.projectId || props.id;
+        if (projectId) {
+            tmProjectInput.value = projectId;
+            loadTmProject();
         }
-
-        // Then load the full project details (skip fitBounds since we already flew)
-        tmProjectInput.value = props.projectId;
-        loadTmProject({ skipFitBounds: true });
     }
 
     /**
@@ -523,19 +580,29 @@
     }
 
     /**
-     * Update visibility of project circles vs project boundary based on zoom
+     * Update visibility of project layers based on zoom and selection
+     * - PMTiles: Show for efficient rendering of all projects
+     * - Selected project: Show highlighted boundary when a specific project is loaded
      */
     function updateProjectLayerVisibility() {
         const zoom = map.getZoom();
         const hasSelectedProject = currentProject !== null;
 
-        // At zoom 10+, hide circles and show project boundary if a project is selected
+        if (!showTmProjects.checked) {
+            // All TM layers hidden
+            return;
+        }
+
+        // At zoom 10+ with a selected project, hide PMTiles and show only the selected project boundary
         if (zoom >= 10 && hasSelectedProject) {
-            map.setLayoutProperty('recent-projects-circles', 'visibility', 'none');
-            map.setLayoutProperty('recent-projects-labels', 'visibility', 'none');
-        } else if (showTmProjects.checked) {
-            map.setLayoutProperty('recent-projects-circles', 'visibility', 'visible');
-            map.setLayoutProperty('recent-projects-labels', 'visibility', 'visible');
+            map.setLayoutProperty('pmtiles-projects-fill', 'visibility', 'none');
+            map.setLayoutProperty('pmtiles-projects-outline', 'visibility', 'none');
+            map.setLayoutProperty('project-labels', 'visibility', 'none');
+        } else {
+            // Show PMTiles polygons and labels (labels have minzoom: 6)
+            map.setLayoutProperty('pmtiles-projects-fill', 'visibility', 'visible');
+            map.setLayoutProperty('pmtiles-projects-outline', 'visibility', 'visible');
+            map.setLayoutProperty('project-labels', 'visibility', 'visible');
         }
     }
 
@@ -555,9 +622,14 @@
             imageryLoading.classList.add('hidden');
             if (imageryFeatures.length > 0) {
                 imageryFeatures = [];
+                imageryCentroids = [];
                 loadedImageryIds.clear();
                 ImagerySource.clearCache();
                 map.getSource('imagery-metadata').setData({
+                    type: 'FeatureCollection',
+                    features: []
+                });
+                map.getSource('imagery-centroids').setData({
                     type: 'FeatureCollection',
                     features: []
                 });
@@ -566,14 +638,6 @@
             return;
         }
 
-        // Between display and fetch threshold: keep existing imagery, don't fetch
-        if (zoom < minFetch) {
-            imageryLoading.classList.add('hidden');
-            // Keep existing imagery visible, just don't fetch new data
-            return;
-        }
-
-        // At or above fetch threshold: fetch new imagery
         const bounds = map.getBounds();
         const boundsArray = [
             bounds.getWest(),
@@ -585,11 +649,21 @@
         const imagerySource = imagerySourceSelect.value;
 
         if (imagerySource === 'esri') {
+            // Between display and fetch (z10-11): only display cached data, don't fetch
+            // This avoids overwhelming ESRI with hundreds of requests at low zoom
+            if (zoom < minFetch) {
+                imageryLoading.classList.add('hidden');
+                return;
+            }
+
             // Show loading indicator
             imageryLoading.classList.remove('hidden');
 
             try {
-                const data = await ImagerySource.fetchEsriMetadata(boundsArray, zoom);
+                let data;
+
+                // At or above fetch threshold (z12+): fetch new imagery
+                data = await ImagerySource.fetchEsriMetadata(boundsArray, zoom);
 
                 if (data.error) {
                     console.warn('Error loading imagery metadata:', data.message);
@@ -612,6 +686,28 @@
                             features: imageryFeatures
                         });
 
+                        // Calculate centroids for new features (one label per tile)
+                        const newCentroids = newFeatures
+                            .map(f => {
+                                const centroid = getCentroidFromGeometry(f.geometry);
+                                if (!centroid) return null;
+                                return {
+                                    type: 'Feature',
+                                    geometry: {
+                                        type: 'Point',
+                                        coordinates: centroid
+                                    },
+                                    properties: { ...f.properties }
+                                };
+                            })
+                            .filter(f => f !== null);
+
+                        imageryCentroids = [...imageryCentroids, ...newCentroids];
+                        map.getSource('imagery-centroids').setData({
+                            type: 'FeatureCollection',
+                            features: imageryCentroids
+                        });
+
                         updateStats();
                     }
                 }
@@ -628,19 +724,10 @@
     function updateZoomWarning() {
         const zoom = map.getZoom();
         const minDisplay = CONFIG.map.minZoomForImageryDisplay;
-        const minFetch = CONFIG.map.minZoomForImageryFetch;
 
-        if (zoom >= minFetch) {
-            // At fetch level - no warning needed
+        if (zoom >= minDisplay) {
+            // At display level - imagery is being loaded, no warning needed
             zoomWarning.classList.add('hidden');
-        } else if (zoom >= minDisplay) {
-            // Between display and fetch - show "zoom to load more"
-            zoomWarning.classList.remove('hidden');
-            if (imageryFeatures.length > 0) {
-                zoomWarning.textContent = `Zoom to ${minFetch}+ to load more imagery metadata (current: ${Math.floor(zoom)})`;
-            } else {
-                zoomWarning.textContent = `Zoom to ${minFetch}+ to load imagery metadata (current: ${Math.floor(zoom)})`;
-            }
         } else {
             // Below display level
             zoomWarning.classList.remove('hidden');
@@ -723,8 +810,9 @@
         map.setLayoutProperty('tm-project-fill', 'visibility', visibility);
         map.setLayoutProperty('tm-project-outline', 'visibility', visibility);
         map.setLayoutProperty('tm-project-outline-dash', 'visibility', visibility);
-        map.setLayoutProperty('recent-projects-circles', 'visibility', visibility);
-        map.setLayoutProperty('recent-projects-labels', 'visibility', visibility);
+        map.setLayoutProperty('pmtiles-projects-fill', 'visibility', visibility);
+        map.setLayoutProperty('pmtiles-projects-outline', 'visibility', visibility);
+        map.setLayoutProperty('project-labels', 'visibility', visibility);
     }
 
     /**

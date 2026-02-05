@@ -11,28 +11,49 @@
 - **MapLibre GL JS** - Map rendering (v4.1.0)
 - **Vanilla JavaScript** - No build step, static site
 - **GitHub Pages** - Hosting
-- **Cloudflare Worker** - CORS proxy for TM API
+- **insta-tm** - S3-hosted TM API mirror (https://github.com/cgiovando/insta-tm)
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `js/config.js` | Configuration (API URLs, colors, thresholds, proxy settings) |
+| `js/config.js` | Configuration (API URLs, colors, thresholds) |
 | `js/app.js` | Main application logic, map initialization, event handlers |
-| `js/tm-api.js` | Tasking Manager API integration with caching |
+| `js/tm-api.js` | Tasking Manager API integration via insta-tm |
 | `js/imagery-sources.js` | ESRI imagery metadata fetching via identify endpoint |
 | `css/style.css` | All styling |
 | `index.html` | Single page app structure |
-| `cloudflare-worker/tm-proxy.js` | Cloudflare Worker code for CORS proxy |
 
 ## Critical Technical Details
 
-### CORS Proxy Setup
+### Insta-TM Integration
 
-The TM API doesn't have CORS headers. We use a Cloudflare Worker as primary proxy:
-- **Worker URL**: `https://tm-api.giovand.workers.dev`
-- **Config location**: `CONFIG.tmApi.workerProxy` in `js/config.js`
-- Fallback proxies: codetabs.com, allorigins.win, corsproxy.io
+TM project data is fetched from **insta-tm**, a cloud-native S3-hosted mirror of the HOT Tasking Manager API:
+- **S3 Base URL**: `https://insta-tm.s3.us-east-1.amazonaws.com`
+- **Individual project**: `{s3Base}/api/v2/projects/{id}`
+- **All projects GeoJSON**: `{s3Base}/all_projects.geojson`
+- **PMTiles**: `{s3Base}/projects.pmtiles` (vector tiles for efficient rendering)
+
+Benefits over direct TM API:
+- No CORS proxy needed (S3 has proper headers)
+- Single request for all projects (no pagination)
+- Fast CDN-cached responses
+- Data synced every 10 minutes
+
+### PMTiles Integration
+
+The app uses **PMTiles** (cloud-native vector tiles) for efficient rendering of all TM project geometries at low zoom levels:
+- **Library**: `pmtiles.js` v3.0.6 via CDN
+- **Protocol**: Registered as `pmtiles://` with MapLibre GL JS
+- **Source layer**: `projects` (contains ~900+ project polygons)
+- **Zoom range**: 0-12 (tiles generated with tippecanoe)
+
+**Layer visibility logic:**
+- At low zoom (global view): Circle markers + PMTiles polygons visible
+- At medium zoom (6+): PMTiles polygons become clearly visible
+- At high zoom (10+) with selected project: PMTiles and circles hide, only selected project boundary shown
+
+This enables smooth exploration of all TM projects worldwide without downloading the full GeoJSON.
 
 ### ESRI Imagery Metadata
 
@@ -44,7 +65,12 @@ The TM API doesn't have CORS headers. We use a Cloudflare Worker as primary prox
   - `ACCURACY (M)` (not `SRC_ACC`)
   - `DESCRIPTION` (not `NICE_NAME`)
 - Date format: YYYYMMDD (e.g., 20220205 = Feb 5, 2022)
-- Multi-point grid sampling for coverage (2x2 or 3x3 based on zoom)
+- **Dual offset grid sampling** for coverage without overwhelming ESRI servers:
+  - Primary grid: Points centered in each cell
+  - Secondary grid: Offset by half-cell to catch tiles between primary points
+  - Grid density by zoom: z15+ (25 pts), z14 (41 pts), z13 (61 pts), z12 (85 pts)
+- **Label deduplication**: Imagery labels use centroid points (one per tile) to avoid duplicate labels from multipolygons
+- **Caching**: Loaded imagery persists in memory while zoom stays at 10+; only clears when zooming below 10
 
 ### Imagery Age Colors
 
@@ -64,14 +90,6 @@ ageColors: {
 - In-memory cache in `TmApi._cache`
 - 5-minute TTL (`_cacheTimeout: 5 * 60 * 1000`)
 - Cache keys: `projects-{limit}`, `project-{id}`
-
-### TM API Pagination
-
-The TM API has a hard limit of **14 projects per page** regardless of the `perPage` parameter. To fetch 100 projects, `fetchRecentProjects()` iterates through multiple pages:
-```javascript
-const perPage = 14; // API's actual limit
-const pagesToFetch = Math.ceil(limit / perPage); // 8 pages for 100 projects
-```
 
 ## UI Layout
 
@@ -122,14 +140,19 @@ This lets users see entire project areas with previously loaded footprints, even
 
 ## Known Issues & Solutions
 
-1. **TM API CORS**: Solved with Cloudflare Worker proxy
-2. **ESRI query endpoint CORS**: Solved with identify endpoint fallback
-3. **Slow public proxies**: Worker proxy is much faster
-4. **Imagery dates showing "Unknown"**: Fixed by using correct field names from identify endpoint
-5. **TM API pagination**: API ignores `perPage` param, limited to 14/page - solved with multi-page fetch
-6. **ESRI zoom limit**: Can't fetch below zoom 12 - solved with two-threshold system (display at 10+)
+1. **ESRI query endpoint CORS**: Solved with identify endpoint fallback
+2. **Imagery dates showing "Unknown"**: Fixed by using correct field names from identify endpoint
+3. **ESRI zoom limit**: Can't fetch below zoom 12 - solved with two-threshold system (display at 10+)
+4. **TM API CORS/pagination**: Solved by using insta-tm S3 mirror instead of direct TM API
 
 ## Recent Changes (Feb 2026)
+
+### Imagery Metadata Improvements
+- **Reduced API requests**: Grid density reduced from 265 to 85 points at z12 to avoid overwhelming ESRI servers
+- **Label deduplication**: Imagery labels now use centroid points, preventing duplicate/overlapping labels from multipolygon tiles
+- **Smart caching**: Imagery data persists in memory while navigating at z10+; users zoom to z12+ to load an area, then can zoom out to z10 to view it
+- **No fetching at z10-11**: Only displays cached data at these zoom levels (prevents excessive API requests)
+- **Initial load fix**: Added `onMapMove()` call on map load to fetch imagery when page loads with hash coordinates
 
 ### Zoom Display Enhancement
 - Added separate `minZoomForImageryFetch` (12) and `minZoomForImageryDisplay` (10) thresholds
@@ -142,8 +165,16 @@ This lets users see entire project areas with previously loaded footprints, even
 - Fixed legend/stats overlap (legend at bottom: 220px, stats at bottom: 40px)
 
 ### TM Projects
-- Fixed pagination to actually fetch 100 projects (TM API limits to 14/page)
-- Fetches 8 pages to get full 100 recent projects
+- **Label deduplication**: TM project labels use centroids from `all_projects.geojson` (933 projects), preventing duplicate labels from multipolygon geometries
+- Migrated to insta-tm S3 mirror for TM data (no more CORS proxy needed)
+- Single request fetches all projects, sorted by lastUpdated
+- Removed Cloudflare Worker dependency
+- Added PMTiles support for efficient rendering of project polygons at low zoom
+- Circle markers (centroids) + polygon outlines visible at global view
+- PMTiles polygons become clearly visible at zoom 6+
+
+### Known Limitations
+- **Small imagery slivers**: ESRI's identify endpoint doesn't support area filtering, so small sliver polygons between larger tiles are still fetched and displayed. Server-side filtering would require the query endpoint (CORS blocked) or a custom proxy.
 
 ## GitHub Actions
 
@@ -152,10 +183,7 @@ This lets users see entire project areas with previously loaded footprints, even
 
 ## Related Resources
 
+- insta-tm repo: https://github.com/cgiovando/insta-tm
 - TM API docs: https://tasks.hotosm.org/api-docs
 - ESRI identify endpoint returns geometry with `rings` array
 - Original inspiration: https://github.com/martinedoesgis/esri-imagery-date-finder
-
-## HOT TM API Note
-
-There's an open request to add `cgiovando.github.io` to the TM API CORS allowlist. If approved, the Cloudflare Worker would no longer be needed. See TM repo issues #6845 and #6969 for context on their CORS policy.

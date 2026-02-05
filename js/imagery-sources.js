@@ -243,21 +243,50 @@ const ImagerySource = {
 
     /**
      * Fallback: Fetch metadata via identify endpoint with multi-point sampling
+     * Uses dual offset grids to ensure complete coverage - identify endpoint only returns
+     * tiles that contain the exact sample point, so we need dense overlapping grids
      */
     async fetchEsriMetadataViaIdentify(bounds, zoom) {
         const [west, south, east, north] = bounds;
 
-        // Create a grid of sample points
-        const gridSize = zoom >= 14 ? 3 : 2;
-        const points = [];
+        // Grid density based on zoom - balance coverage vs request count
+        // Keep requests reasonable to avoid overwhelming ESRI servers
+        let gridSize;
+        if (zoom >= 15) {
+            gridSize = 4;   // 4x4 + 3x3 = 25 points
+        } else if (zoom >= 14) {
+            gridSize = 5;   // 5x5 + 4x4 = 41 points
+        } else if (zoom >= 13) {
+            gridSize = 6;   // 6x6 + 5x5 = 61 points
+        } else {
+            gridSize = 7;   // 7x7 + 6x6 = 85 points for z12
+        }
 
+        const points = [];
+        const width = east - west;
+        const height = north - south;
+
+        // Primary grid - centered in each cell
         for (let i = 0; i < gridSize; i++) {
             for (let j = 0; j < gridSize; j++) {
-                const lon = west + (east - west) * (i + 0.5) / gridSize;
-                const lat = south + (north - south) * (j + 0.5) / gridSize;
+                const lon = west + width * (i + 0.5) / gridSize;
+                const lat = south + height * (j + 0.5) / gridSize;
                 points.push([lon, lat]);
             }
         }
+
+        // Secondary offset grid - offset by half a cell to catch tiles between primary points
+        // This creates a checkerboard pattern that significantly improves coverage
+        const offsetGridSize = Math.max(gridSize - 1, 4);
+        for (let i = 0; i < offsetGridSize; i++) {
+            for (let j = 0; j < offsetGridSize; j++) {
+                const lon = west + width * (i + 1) / gridSize;
+                const lat = south + height * (j + 1) / gridSize;
+                points.push([lon, lat]);
+            }
+        }
+
+        console.log(`Identify grid: ${gridSize}x${gridSize} primary + ${offsetGridSize}x${offsetGridSize} offset = ${points.length} total points`);
 
         const allFeatures = [];
         const seenIds = new Set();
@@ -302,8 +331,8 @@ const ImagerySource = {
             geometry: `${lon},${lat}`,
             sr: '4326',
             mapExtent: `${west},${south},${east},${north}`,
-            imageDisplay: '512,512,96',
-            tolerance: '10',
+            imageDisplay: '1024,1024,96',
+            tolerance: '20',
             layers: 'visible:0',
             returnGeometry: 'true'
         });
