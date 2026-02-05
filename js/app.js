@@ -42,7 +42,7 @@
             container: 'map',
             style: {
                 version: 8,
-                glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
+                glyphs: 'https://fonts.openmaptiles.org/{fontstack}/{range}.pbf',
                 sources: {
                     'basemap': {
                         type: 'raster',
