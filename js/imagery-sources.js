@@ -321,7 +321,8 @@ const ImagerySource = {
             const features = (data.results || [])
                 .filter(r => r.geometry && r.geometry.rings)
                 .map(r => {
-                    const srcDate = r.attributes?.SRC_DATE;
+                    // Identify endpoint uses different field names than query endpoint
+                    const srcDate = r.attributes?.['DATE (YYYYMMDD)'] || r.attributes?.SRC_DATE;
                     const parsedDate = this.parseEsriDate(srcDate);
 
                     return {
@@ -329,10 +330,10 @@ const ImagerySource = {
                         properties: {
                             OBJECTID: r.attributes?.OBJECTID,
                             SRC_DATE: srcDate,
-                            SRC_RES: r.attributes?.SRC_RES,
-                            SRC_ACC: r.attributes?.SRC_ACC,
-                            NICE_NAME: r.attributes?.NICE_NAME,
-                            NICE_DESC: r.attributes?.NICE_DESC,
+                            SRC_RES: r.attributes?.['RESOLUTION (M)'] || r.attributes?.SRC_RES,
+                            SRC_ACC: r.attributes?.['ACCURACY (M)'] || r.attributes?.SRC_ACC,
+                            NICE_NAME: r.attributes?.DESCRIPTION || r.attributes?.NICE_NAME,
+                            NICE_DESC: r.attributes?.SOURCE_INFO || r.attributes?.NICE_DESC,
                             layerName: r.layerName,
                             parsedDate: parsedDate,
                             formattedDate: this.formatDate(parsedDate),

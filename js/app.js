@@ -161,16 +161,16 @@
             type: 'symbol',
             source: 'recent-projects',
             layout: {
-                'text-field': ['get', 'projectId'],
-                'text-font': ['Open Sans Regular'],
-                'text-size': 10,
-                'text-offset': [0, 1.5],
+                'text-field': ['concat', '#', ['get', 'projectId']],
+                'text-font': ['Open Sans Bold'],
+                'text-size': 12,
+                'text-offset': [0, 1.8],
                 'text-anchor': 'top'
             },
             paint: {
-                'text-color': '#2563eb',
+                'text-color': '#1e40af',
                 'text-halo-color': '#ffffff',
-                'text-halo-width': 1
+                'text-halo-width': 2
             }
         });
 
@@ -363,7 +363,23 @@
         // Add click handlers
         recentProjectsList.querySelectorAll('.recent-project-item').forEach(item => {
             item.addEventListener('click', () => {
-                const projectId = item.dataset.projectId;
+                const projectId = parseInt(item.dataset.projectId);
+
+                // Find the centroid from mapResults and fly there immediately
+                if (recentProjectsGeoJSON && recentProjectsGeoJSON.features) {
+                    const feature = recentProjectsGeoJSON.features.find(
+                        f => f.properties.projectId === projectId
+                    );
+                    if (feature && feature.geometry && feature.geometry.coordinates) {
+                        map.flyTo({
+                            center: feature.geometry.coordinates,
+                            zoom: 13,
+                            duration: 1000
+                        });
+                    }
+                }
+
+                // Then load the full project details
                 tmProjectInput.value = projectId;
                 loadTmProject();
             });
@@ -415,7 +431,19 @@
     function onRecentProjectClick(e) {
         if (!e.features || e.features.length === 0) return;
 
-        const props = e.features[0].properties;
+        const feature = e.features[0];
+        const props = feature.properties;
+
+        // Immediately fly to the clicked point
+        if (feature.geometry && feature.geometry.coordinates) {
+            map.flyTo({
+                center: feature.geometry.coordinates,
+                zoom: 13,
+                duration: 1000
+            });
+        }
+
+        // Then load the full project details
         tmProjectInput.value = props.projectId;
         loadTmProject();
     }
