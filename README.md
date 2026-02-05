@@ -25,10 +25,11 @@ When creating map data in OpenStreetMap through Tasking Manager projects, we oft
 - **TM project overlay**: Load any Tasking Manager project boundary
 - **Color-coded age**: Instantly see imagery freshness (green = recent, red = old)
 - **Click for details**: Get imagery dates, resolution, and source info
-- **Recent projects list**: Browse and load recent TM projects
+- **Recent projects list**: Browse and load recent TM projects (100 most recent)
 - **Basemap switcher**: Compare different imagery providers
 - **Age statistics**: View newest/oldest imagery dates for visible area
 - **URL deep-linking**: Share links to specific TM projects (e.g., `?project=17232`)
+- **Smart caching**: Imagery metadata persists when zooming out (down to z10)
 
 ## Imagery Age Legend
 
@@ -43,16 +44,37 @@ When creating map data in OpenStreetMap through Tasking Manager projects, we oft
 
 1. Visit the app at **https://cgiovando.github.io/osm-carbon-date/**
 2. Enter a Tasking Manager project ID or click a project from the list
-3. Zoom in to load imagery metadata (loads at zoom 12+)
+3. Zoom to level 12+ to load imagery metadata
 4. Click on imagery tiles to see capture dates and details
+
+**Note**: Imagery loads at zoom 12+ but stays visible down to zoom 10 for context.
 
 ## Tech Stack
 
 - [MapLibre GL JS](https://maplibre.org/) — Map rendering
-- [Tasking Manager API](https://tasks.hotosm.org/api-docs) — Project geometries
-- [ESRI ArcGIS REST API](https://developers.arcgis.com/rest/) — Imagery metadata
-- [Cloudflare Workers](https://workers.cloudflare.com/) — CORS proxy
+- [insta-tm](https://github.com/hotosm/insta-tm) — S3-hosted TM API mirror (synced every 10 min)
+- [PMTiles](https://protomaps.com/docs/pmtiles) — Efficient vector tiles for TM project polygons
+- [ESRI ArcGIS REST API](https://developers.arcgis.com/rest/) — Imagery metadata via identify endpoint
 - Vanilla JavaScript — No build step required
+
+## Architecture
+
+### TM Project Data
+
+The app uses **insta-tm**, an S3-hosted mirror of Tasking Manager data that syncs every 10 minutes via GitHub Actions. This avoids CORS issues and provides fast, reliable access to:
+
+- All TM projects as a single GeoJSON file (sorted client-side by lastUpdated)
+- Individual project details at `/api/v2/projects/{id}`
+- PMTiles vector tiles for efficient polygon rendering at low zoom levels
+
+### ESRI Imagery Metadata
+
+Imagery metadata is fetched from ESRI's World Imagery MapServer using the **identify endpoint** with multi-point grid sampling:
+
+- Dual offset grids ensure complete coverage (primary grid + half-cell offset)
+- Grid density adapts to zoom level (25-85 sample points)
+- Results are cached in-memory while zoom remains ≥ 10
+- Label deduplication using centroids prevents overlapping text
 
 ## Deployment
 
@@ -60,17 +82,7 @@ When creating map data in OpenStreetMap through Tasking Manager projects, we oft
 
 1. Fork/clone this repo
 2. Enable GitHub Pages in repo settings (deploy from main branch)
-3. Optionally deploy your own Cloudflare Worker for the CORS proxy (see below)
-
-### CORS Proxy
-
-The Tasking Manager API doesn't include CORS headers, so a proxy is required for browser requests. This app uses a Cloudflare Worker as the primary proxy with public fallbacks.
-
-To deploy your own Cloudflare Worker:
-
-1. Create a free account at [workers.cloudflare.com](https://workers.cloudflare.com/)
-2. Create a new Worker and paste the code from `cloudflare-worker/tm-proxy.js`
-3. Deploy and update `CONFIG.tmApi.workerProxy` in `js/config.js` with your worker URL
+3. The app works out-of-the-box using the public insta-tm S3 bucket
 
 ### Local Development
 
@@ -103,3 +115,4 @@ MIT
 ## Credits
 
 - Original ESRI imagery date finder concept by [martinedoesgis](https://github.com/martinedoesgis/esri-imagery-date-finder)
+- TM data powered by [insta-tm](https://github.com/hotosm/insta-tm) by HOT
