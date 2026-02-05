@@ -1,10 +1,14 @@
 # osm-carbon-date
 
-**Carbon-dating your OSM data** — See how old the imagery is behind your mapping projects.
+**Carbon-dating your OSM imagery** — See how old the satellite imagery is behind your mapping projects.
+
+## Live Demo
+
+**[View the app →](https://cgiovando.github.io/osm-carbon-date/)**
 
 ## The Problem
 
-When creating map data in OpenStreetMap through HOT Tasking Manager projects, we often don't know how current the source imagery is. This leads to:
+When creating map data in OpenStreetMap through Tasking Manager projects, we often don't know how current the source imagery is. This leads to:
 
 - Map data that may be months or years out of date
 - Missing metadata about imagery age in OSM changesets
@@ -13,105 +17,60 @@ When creating map data in OpenStreetMap through HOT Tasking Manager projects, we
 
 ## The Solution
 
-**osm-carbon-date** overlays HOT Tasking Manager project boundaries with imagery metadata from multiple providers, showing you exactly when each imagery tile was captured.
+**osm-carbon-date** overlays Tasking Manager project boundaries with imagery metadata, showing you exactly when each imagery tile was captured.
 
 ## Features
 
-- **Multiple imagery sources**: ESRI World Imagery, OpenAerialMap (more coming)
-- **TM project overlay**: See any Tasking Manager project boundary
+- **ESRI World Imagery metadata**: See capture dates for imagery tiles
+- **TM project overlay**: Load any Tasking Manager project boundary
 - **Color-coded age**: Instantly see imagery freshness (green = recent, red = old)
-- **Click for details**: Get imagery dates, TM project info, and direct links
+- **Click for details**: Get imagery dates, resolution, and source info
+- **Recent projects list**: Browse and load recent TM projects
 - **Basemap switcher**: Compare different imagery providers
-- **Age statistics**: Min/max/average imagery age for project areas
+- **Age statistics**: View newest/oldest imagery dates for visible area
 - **URL deep-linking**: Share links to specific TM projects (e.g., `?project=17232`)
-
-## Usage
-
-1. Visit the app at `https://hotosm.github.io/osm-carbon-date/` (or your deployment)
-2. Enter a HOT Tasking Manager project ID or browse the map
-3. Zoom in to load imagery metadata (loads at zoom 12+)
-4. Click on TM project areas to see imagery age statistics
-5. Click on imagery tiles to see capture dates
 
 ## Imagery Age Legend
 
 | Color | Age |
 |-------|-----|
-| Green | < 1 year |
-| Yellow | 1-2 years |
-| Orange | 2-3 years |
-| Red | > 3 years |
+| 🟢 Green | < 1 year |
+| 🟡 Yellow | 1-2 years |
+| 🟠 Orange | 2-3 years |
+| 🔴 Red | > 3 years |
 
-## Supported Imagery Sources
+## Usage
 
-| Provider | Status | Notes |
-|----------|--------|-------|
-| ESRI World Imagery | Supported | Metadata via ArcGIS REST API |
-| OpenAerialMap | Planned | Community-contributed imagery |
-| Bing Maps | Planned | Metadata API TBD |
-| Maxar | Planned | Requires API key |
+1. Visit the app at **https://cgiovando.github.io/osm-carbon-date/**
+2. Enter a Tasking Manager project ID or click a project from the list
+3. Zoom in to load imagery metadata (loads at zoom 12+)
+4. Click on imagery tiles to see capture dates and details
+
+## Tech Stack
+
+- [MapLibre GL JS](https://maplibre.org/) — Map rendering
+- [Tasking Manager API](https://tasks.hotosm.org/api-docs) — Project geometries
+- [ESRI ArcGIS REST API](https://developers.arcgis.com/rest/) — Imagery metadata
+- [Cloudflare Workers](https://workers.cloudflare.com/) — CORS proxy
+- Vanilla JavaScript — No build step required
 
 ## Deployment
 
-### GitHub Pages (Recommended)
+### GitHub Pages
 
 1. Fork/clone this repo
-2. Deploy a CORS proxy (see below)
-3. Update `js/config.js` with your proxy URL
-4. Enable GitHub Pages in repo settings
+2. Enable GitHub Pages in repo settings (deploy from main branch)
+3. Optionally deploy your own Cloudflare Worker for the CORS proxy (see below)
 
-### CORS Proxy Setup
+### CORS Proxy
 
-Both the HOT Tasking Manager API and ESRI's imagery metadata API lack CORS headers, requiring a proxy for browser requests.
+The Tasking Manager API doesn't include CORS headers, so a proxy is required for browser requests. This app uses a Cloudflare Worker as the primary proxy with public fallbacks.
 
-#### Option 1: Cloudflare Workers (Free)
+To deploy your own Cloudflare Worker:
 
-Create a new Worker with this code:
-
-```javascript
-// worker.js
-export default {
-  async fetch(request) {
-    const url = new URL(request.url);
-    const targetUrl = url.searchParams.get('url');
-
-    if (!targetUrl) {
-      return new Response('Missing url parameter', { status: 400 });
-    }
-
-    // Only allow specific domains
-    const allowed = ['tasking-manager-tm4-production-api.hotosm.org', 'services.arcgisonline.com'];
-    const targetHost = new URL(targetUrl).hostname;
-    if (!allowed.some(h => targetHost.includes(h))) {
-      return new Response('Domain not allowed', { status: 403 });
-    }
-
-    const response = await fetch(targetUrl, {
-      headers: { 'User-Agent': 'osm-carbon-date/1.0' }
-    });
-
-    const newResponse = new Response(response.body, response);
-    newResponse.headers.set('Access-Control-Allow-Origin', '*');
-    return newResponse;
-  }
-};
-```
-
-Then update `js/config.js`:
-```javascript
-tmApi: {
-    corsProxy: 'https://your-worker.workers.dev/?url='
-},
-esri: {
-    corsProxy: 'https://your-worker.workers.dev/?url='
-}
-```
-
-#### Option 2: Local Development with CORS Extension
-
-For local development, install a browser extension like:
-- [CORS Unblock](https://chrome.google.com/webstore/detail/cors-unblock/) (Chrome)
-- [CORS Everywhere](https://addons.mozilla.org/en-US/firefox/addon/cors-everywhere/) (Firefox)
+1. Create a free account at [workers.cloudflare.com](https://workers.cloudflare.com/)
+2. Create a new Worker and paste the code from `cloudflare-worker/tm-proxy.js`
+3. Deploy and update `CONFIG.tmApi.workerProxy` in `js/config.js` with your worker URL
 
 ### Local Development
 
@@ -125,16 +84,17 @@ npx serve .
 
 Then open `http://localhost:8000`
 
-## Tech Stack
+## AI-Generated Code Disclaimer
 
-- [MapLibre GL JS](https://maplibre.org/) — Map rendering
-- [HOT Tasking Manager API](https://tasks.hotosm.org/api-docs) — Project geometries
-- [ESRI ArcGIS REST API](https://developers.arcgis.com/rest/) — Imagery metadata
-- Vanilla JavaScript — No build step required
+**A significant portion of this application's code was generated with assistance from AI tools.**
 
-## Contributing
+### Tools Used
+- **Claude** (Anthropic) - Code generation, debugging, and documentation
 
-Contributions welcome! Ideas for new imagery sources, features, or improvements — open an issue or PR.
+### What This Means
+- The codebase was developed with AI assistance based on requirements and iterative prompts
+- All functionality has been tested and verified to work as intended
+- The code has undergone human review for usability and correctness
 
 ## License
 
@@ -142,5 +102,4 @@ MIT
 
 ## Credits
 
-- Built for [HOT - Humanitarian OpenStreetMap Team](https://www.hotosm.org/)
-- Original ESRI imagery date finder by [martinedoesgis](https://github.com/martinedoesgis)
+- Original ESRI imagery date finder concept by [martinedoesgis](https://github.com/martinedoesgis/esri-imagery-date-finder)
