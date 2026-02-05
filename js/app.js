@@ -366,6 +366,7 @@
                 const projectId = parseInt(item.dataset.projectId);
 
                 // Find the centroid from mapResults and fly there immediately
+                let didFly = false;
                 if (recentProjectsGeoJSON && recentProjectsGeoJSON.features) {
                     const feature = recentProjectsGeoJSON.features.find(
                         f => f.properties.projectId === projectId
@@ -376,12 +377,13 @@
                             zoom: 13,
                             duration: 1000
                         });
+                        didFly = true;
                     }
                 }
 
-                // Then load the full project details
+                // Then load the full project details (skip fitBounds if we already flew)
                 tmProjectInput.value = projectId;
-                loadTmProject();
+                loadTmProject({ skipFitBounds: didFly });
             });
         });
     }
@@ -443,15 +445,17 @@
             });
         }
 
-        // Then load the full project details
+        // Then load the full project details (skip fitBounds since we already flew)
         tmProjectInput.value = props.projectId;
-        loadTmProject();
+        loadTmProject({ skipFitBounds: true });
     }
 
     /**
      * Load a TM project
+     * @param {Object} options - Optional settings
+     * @param {boolean} options.skipFitBounds - Skip flying to bounds (if already zoomed)
      */
-    async function loadTmProject() {
+    async function loadTmProject(options = {}) {
         const projectId = parseInt(tmProjectInput.value);
         if (!projectId || isNaN(projectId)) {
             alert('Please enter a valid TM project ID');
@@ -461,37 +465,62 @@
         loadProjectBtn.disabled = true;
         loadProjectBtn.innerHTML = '<span class="loading"></span>';
 
+        // Show loading state in info panel immediately
+        infoTitle.textContent = `TM Project #${projectId}`;
+        infoContent.innerHTML = '<div class="loading-text">Loading project...</div>';
+        infoPanel.classList.remove('hidden');
+
         try {
             currentProject = await TmApi.fetchProject(projectId);
 
-            // Update map source
+            // Update map source with project geometry
             const geojson = TmApi.projectToGeoJSON(currentProject);
             map.getSource('tm-project').setData({
                 type: 'FeatureCollection',
                 features: [geojson]
             });
 
-            // Fly to project bounds
-            const bounds = TmApi.getProjectBounds(currentProject);
-            if (bounds) {
-                map.fitBounds(bounds, { padding: 50 });
+            // Fly to project bounds only if not skipped
+            if (!options.skipFitBounds) {
+                const bounds = TmApi.getProjectBounds(currentProject);
+                if (bounds) {
+                    map.fitBounds(bounds, { padding: 50 });
+                }
             }
 
-            // Show info panel
-            infoTitle.textContent = `TM Project #${currentProject.id}`;
+            // Update info panel with full details
             infoContent.innerHTML = TmApi.formatProjectInfo(currentProject);
-            infoPanel.classList.remove('hidden');
 
             // Update URL
             const url = new URL(window.location);
             url.searchParams.set('project', projectId);
             window.history.replaceState({}, '', url);
 
+            // Update layer visibility based on zoom
+            updateProjectLayerVisibility();
+
         } catch (error) {
-            alert(error.message);
+            infoContent.innerHTML = `<div class="error-text">Error: ${error.message}</div>`;
         } finally {
             loadProjectBtn.disabled = false;
             loadProjectBtn.textContent = 'Load';
+        }
+    }
+
+    /**
+     * Update visibility of project circles vs project boundary based on zoom
+     */
+    function updateProjectLayerVisibility() {
+        const zoom = map.getZoom();
+        const hasSelectedProject = currentProject !== null;
+
+        // At zoom 10+, hide circles and show project boundary if a project is selected
+        if (zoom >= 10 && hasSelectedProject) {
+            map.setLayoutProperty('recent-projects-circles', 'visibility', 'none');
+            map.setLayoutProperty('recent-projects-labels', 'visibility', 'none');
+        } else if (showTmProjects.checked) {
+            map.setLayoutProperty('recent-projects-circles', 'visibility', 'visible');
+            map.setLayoutProperty('recent-projects-labels', 'visibility', 'visible');
         }
     }
 
@@ -569,6 +598,9 @@
             zoomWarning.classList.remove('hidden');
             zoomWarning.textContent = `Zoom in to level ${CONFIG.map.minZoomForImagery}+ to load imagery metadata (current: ${Math.floor(zoom)})`;
         }
+
+        // Also update project layer visibility
+        updateProjectLayerVisibility();
     }
 
     /**

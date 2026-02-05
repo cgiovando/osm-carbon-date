@@ -13,27 +13,41 @@ const TmApi = {
 
         console.log('Fetching recent TM projects...');
 
-        // Try direct fetch first (TM API might support CORS now)
+        // Try with primary proxy, then fallback
+        const proxies = [CONFIG.tmApi.corsProxy, CONFIG.tmApi.corsProxyAlt];
         let response;
-        let usedProxy = false;
+        let lastError;
 
-        // Use CORS proxy (allorigins) since TM API doesn't have CORS headers
-        const proxyUrl = `${CONFIG.tmApi.corsProxy}${encodeURIComponent(apiUrl)}`;
-        console.log('Fetching via proxy:', proxyUrl.substring(0, 80) + '...');
+        for (const proxy of proxies) {
+            const proxyUrl = `${proxy}${encodeURIComponent(apiUrl)}`;
+            console.log('Trying proxy:', proxy.substring(0, 30) + '...');
 
-        try {
-            response = await fetch(proxyUrl, {
-                method: 'GET',
-                headers: { 'Accept': 'application/json' }
-            });
-            console.log('Proxy response status:', response.status);
+            try {
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 10000); // 10s timeout
 
-            if (!response.ok) {
-                throw new Error(`Proxy returned ${response.status}`);
+                response = await fetch(proxyUrl, {
+                    method: 'GET',
+                    headers: { 'Accept': 'application/json' },
+                    signal: controller.signal
+                });
+                clearTimeout(timeout);
+
+                if (response.ok) {
+                    console.log('Proxy succeeded:', proxy.substring(0, 30));
+                    break;
+                }
+                lastError = new Error(`Proxy returned ${response.status}`);
+            } catch (err) {
+                console.warn('Proxy failed:', proxy.substring(0, 30), err.message);
+                lastError = err;
+                response = null;
             }
-        } catch (err) {
-            console.error('Fetch failed:', err.message);
-            throw err;
+        }
+
+        if (!response || !response.ok) {
+            console.error('All proxies failed');
+            throw lastError || new Error('Failed to fetch projects');
         }
 
         try {
@@ -77,33 +91,44 @@ const TmApi = {
      * @returns {Promise<Object>} Project data with geometry
      */
     async fetchProject(projectId) {
-        // Use CORS proxy since TM API doesn't have CORS headers
         const apiUrl = `${CONFIG.tmApi.baseUrl}/projects/${projectId}/`;
-        const url = CONFIG.tmApi.corsProxy
-            ? `${CONFIG.tmApi.corsProxy}${encodeURIComponent(apiUrl)}`
-            : apiUrl;
+        const proxies = [CONFIG.tmApi.corsProxy, CONFIG.tmApi.corsProxyAlt];
+        let response;
+        let lastError;
 
-        try {
-            const response = await fetch(url, {
-                method: 'GET',
-                headers: {
-                    'Accept': 'application/json'
+        for (const proxy of proxies) {
+            const proxyUrl = `${proxy}${encodeURIComponent(apiUrl)}`;
+            console.log('Fetching project via:', proxy.substring(0, 30) + '...');
+
+            try {
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 8000); // 8s timeout
+
+                response = await fetch(proxyUrl, {
+                    method: 'GET',
+                    headers: { 'Accept': 'application/json' },
+                    signal: controller.signal
+                });
+                clearTimeout(timeout);
+
+                if (response.ok) {
+                    const data = await response.json();
+                    return this.processProject(data);
                 }
-            });
 
-            if (!response.ok) {
                 if (response.status === 404) {
                     throw new Error(`Project #${projectId} not found`);
                 }
-                throw new Error(`API error: ${response.status}`);
+                lastError = new Error(`API error: ${response.status}`);
+            } catch (error) {
+                if (error.message.includes('not found')) throw error;
+                console.warn('Proxy failed:', proxy.substring(0, 30), error.message);
+                lastError = error;
             }
-
-            const data = await response.json();
-            return this.processProject(data);
-        } catch (error) {
-            console.error('Error fetching TM project:', error);
-            throw error;
         }
+
+        console.error('All proxies failed for project:', projectId);
+        throw lastError || new Error('Failed to fetch project');
     },
 
     /**
