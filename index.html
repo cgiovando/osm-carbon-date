@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>osm-carbon-date — Imagery Age Finder for HOT TM</title>
+    <link href="https://unpkg.com/maplibre-gl@4.1.0/dist/maplibre-gl.css" rel="stylesheet" />
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div id="map"></div>
+
+    <!-- Header Panel -->
+    <div id="header" class="panel">
+        <h1>osm-carbon-date</h1>
+        <p class="subtitle">Carbon-dating your OSM imagery</p>
+    </div>
+
+    <!-- Controls Panel -->
+    <div id="controls" class="panel">
+        <!-- TM Project Search -->
+        <div class="control-group">
+            <label for="tm-project-input">TM Project ID</label>
+            <div class="input-row">
+                <input type="number" id="tm-project-input" placeholder="e.g. 12345">
+                <button id="load-project-btn">Load</button>
+            </div>
+        </div>
+
+        <!-- Basemap Selector -->
+        <div class="control-group">
+            <label for="basemap-select">Basemap</label>
+            <select id="basemap-select">
+                <option value="esri-imagery">ESRI World Imagery</option>
+                <option value="osm">OpenStreetMap</option>
+                <option value="esri-topo">ESRI Topographic</option>
+                <option value="carto-dark">Carto Dark</option>
+            </select>
+        </div>
+
+        <!-- Imagery Source Selector -->
+        <div class="control-group">
+            <label for="imagery-source-select">Imagery Metadata Source</label>
+            <select id="imagery-source-select">
+                <option value="esri">ESRI World Imagery</option>
+                <option value="oam" disabled>OpenAerialMap (coming soon)</option>
+            </select>
+        </div>
+
+        <!-- Layer Toggles -->
+        <div class="control-group">
+            <label>Layers</label>
+            <div class="checkbox-row">
+                <input type="checkbox" id="show-imagery-meta" checked>
+                <label for="show-imagery-meta">Imagery metadata</label>
+            </div>
+            <div class="checkbox-row">
+                <input type="checkbox" id="show-tm-projects" checked>
+                <label for="show-tm-projects">TM projects</label>
+            </div>
+        </div>
+
+        <!-- Recent Projects -->
+        <div class="control-group">
+            <label>Recent TM Projects</label>
+            <div id="recent-projects-list" class="recent-projects-list">
+                <div class="loading-text">Loading...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Legend Panel -->
+    <div id="legend" class="panel">
+        <h3>Imagery Age</h3>
+        <div class="legend-item">
+            <span class="legend-color" style="background: #22c55e;"></span>
+            <span>&lt; 1 year</span>
+        </div>
+        <div class="legend-item">
+            <span class="legend-color" style="background: #eab308;"></span>
+            <span>1-2 years</span>
+        </div>
+        <div class="legend-item">
+            <span class="legend-color" style="background: #f97316;"></span>
+            <span>2-3 years</span>
+        </div>
+        <div class="legend-item">
+            <span class="legend-color" style="background: #ef4444;"></span>
+            <span>&gt; 3 years</span>
+        </div>
+    </div>
+
+    <!-- Zoom Warning -->
+    <div id="zoom-warning" class="panel">
+        Zoom in to level 12+ to load imagery metadata
+    </div>
+
+    <!-- Info Panel (for TM project details) -->
+    <div id="info-panel" class="panel hidden">
+        <button id="close-info" class="close-btn">&times;</button>
+        <h3 id="info-title">TM Project</h3>
+        <div id="info-content"></div>
+    </div>
+
+    <!-- Stats Panel -->
+    <div id="stats-panel" class="panel hidden">
+        <h3>Imagery Statistics</h3>
+        <div id="stats-content"></div>
+    </div>
+
+    <script src="https://unpkg.com/maplibre-gl@4.1.0/dist/maplibre-gl.js"></script>
+    <script src="js/config.js"></script>
+    <script src="js/imagery-sources.js"></script>
+    <script src="js/tm-api.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
