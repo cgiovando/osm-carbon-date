@@ -65,7 +65,7 @@
             hash: false // We'll handle hash manually to include project
         });
 
-        map.addControl(new maplibregl.NavigationControl(), 'top-left');
+        map.addControl(new maplibregl.NavigationControl(), 'bottom-right');
         map.addControl(new maplibregl.ScaleControl(), 'bottom-left');
 
         map.on('load', () => {

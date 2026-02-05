@@ -20,9 +20,9 @@ body {
     bottom: 0;
 }
 
-/* Move navigation control below header */
-.maplibregl-ctrl-top-left {
-    top: 70px;
+/* Position navigation control above legend and stats */
+.maplibregl-ctrl-bottom-right {
+    bottom: 270px;
 }
 
 /* Panels */
@@ -155,7 +155,7 @@ button:disabled {
 
 /* Legend */
 #legend {
-    bottom: 130px;
+    bottom: 160px;
     right: 10px;
     min-width: 120px;
 }
