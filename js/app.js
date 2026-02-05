@@ -61,12 +61,25 @@
             },
             center: initialCenter,
             zoom: initialZoom,
-            attributionControl: true,
+            attributionControl: false, // We'll add custom attribution
             hash: false // We'll handle hash manually to include project
         });
 
-        map.addControl(new maplibregl.NavigationControl(), 'bottom-right');
+        // Add compact attribution control
+        map.addControl(new maplibregl.AttributionControl({
+            compact: true,
+            customAttribution: ''
+        }), 'bottom-right');
         map.addControl(new maplibregl.ScaleControl(), 'bottom-left');
+
+        // Collapse attribution by default (remove open attribute)
+        setTimeout(() => {
+            const attrib = document.querySelector('.maplibregl-ctrl-attrib');
+            if (attrib) {
+                attrib.removeAttribute('open');
+                attrib.classList.remove('maplibregl-compact-show');
+            }
+        }, 100);
 
         map.on('load', () => {
             addMapSources();
