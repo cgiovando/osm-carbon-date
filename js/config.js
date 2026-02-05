@@ -56,18 +56,15 @@ const CONFIG = {
         unknown: '#9ca3af'
     },
 
-    // HOT Tasking Manager API
+    // Insta-TM: Cloud-native mirror of HOT Tasking Manager API
+    // https://github.com/cgiovando/insta-tm
     tmApi: {
-        baseUrl: 'https://tasking-manager-tm4-production-api.hotosm.org/api/v2',
+        // S3-hosted API endpoints (no CORS proxy needed)
         projectUrl: 'https://tasks.hotosm.org/projects',
-        // Custom Cloudflare Worker proxy (fast, reliable)
-        workerProxy: 'https://tm-api.giovand.workers.dev',
-        // Fallback CORS proxies (slower, less reliable)
-        corsProxies: [
-            'https://api.codetabs.com/v1/proxy?quest=',
-            'https://api.allorigins.win/raw?url=',
-            'https://corsproxy.io/?'
-        ]
+        s3Base: 'https://insta-tm.s3.us-east-1.amazonaws.com',
+        // Individual project: {s3Base}/api/v2/projects/{id}
+        // All projects GeoJSON: {s3Base}/all_projects.geojson
+        // PMTiles: {s3Base}/projects.pmtiles
     },
 
     // ESRI API - using identify endpoint which returns geometry and works without CORS issues
