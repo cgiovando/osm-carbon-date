@@ -9,6 +9,7 @@
     let loadedImageryIds = new Set();
     let imageryFeatures = [];
     let recentProjects = [];
+    let recentProjectsGeoJSON = null;
 
     // DOM elements
     const tmProjectInput = document.getElementById('tm-project-input');
@@ -140,26 +141,36 @@
      * Add map layers
      */
     function addMapLayers() {
-        // Recent projects fill (subtle)
+        // Recent projects as circles (centroids)
         map.addLayer({
-            id: 'recent-projects-fill',
-            type: 'fill',
+            id: 'recent-projects-circles',
+            type: 'circle',
             source: 'recent-projects',
             paint: {
-                'fill-color': '#2563eb',
-                'fill-opacity': 0.1
+                'circle-radius': 8,
+                'circle-color': '#2563eb',
+                'circle-opacity': 0.8,
+                'circle-stroke-color': '#ffffff',
+                'circle-stroke-width': 2
             }
         });
 
-        // Recent projects outline
+        // Recent projects labels
         map.addLayer({
-            id: 'recent-projects-outline',
-            type: 'line',
+            id: 'recent-projects-labels',
+            type: 'symbol',
             source: 'recent-projects',
+            layout: {
+                'text-field': ['get', 'projectId'],
+                'text-font': ['Open Sans Regular'],
+                'text-size': 10,
+                'text-offset': [0, 1.5],
+                'text-anchor': 'top'
+            },
             paint: {
-                'line-color': '#2563eb',
-                'line-width': 1,
-                'line-opacity': 0.5
+                'text-color': '#2563eb',
+                'text-halo-color': '#ffffff',
+                'text-halo-width': 1
             }
         });
 
@@ -280,11 +291,11 @@
         });
 
         // Click on recent projects
-        map.on('click', 'recent-projects-fill', onRecentProjectClick);
-        map.on('mouseenter', 'recent-projects-fill', () => {
+        map.on('click', 'recent-projects-circles', onRecentProjectClick);
+        map.on('mouseenter', 'recent-projects-circles', () => {
             map.getCanvas().style.cursor = 'pointer';
         });
-        map.on('mouseleave', 'recent-projects-fill', () => {
+        map.on('mouseleave', 'recent-projects-circles', () => {
             map.getCanvas().style.cursor = '';
         });
 
@@ -315,11 +326,14 @@
      */
     async function loadRecentProjects() {
         try {
-            recentProjects = await TmApi.fetchRecentProjects(20);
+            const data = await TmApi.fetchRecentProjects(20);
+            recentProjects = data.projects;
+            recentProjectsGeoJSON = data.mapResults;
             renderRecentProjectsList();
             renderRecentProjectsOnMap();
         } catch (error) {
             console.error('Error loading recent projects:', error);
+            recentProjectsList.innerHTML = '<div class="loading-text">Error loading projects</div>';
         }
     }
 
@@ -353,38 +367,36 @@
     }
 
     /**
-     * Render recent projects on map
+     * Render recent projects on map using centroid points from mapResults
      */
     function renderRecentProjectsOnMap() {
-        const features = recentProjects
-            .filter(p => p.aoiBBOX)
-            .map(project => {
-                // aoiBBOX is [minX, minY, maxX, maxY]
-                const bbox = project.aoiBBOX;
-                return {
-                    type: 'Feature',
-                    properties: {
-                        projectId: project.projectId,
-                        name: project.name,
-                        status: project.status
-                    },
-                    geometry: {
-                        type: 'Polygon',
-                        coordinates: [[
-                            [bbox[0], bbox[1]],
-                            [bbox[2], bbox[1]],
-                            [bbox[2], bbox[3]],
-                            [bbox[0], bbox[3]],
-                            [bbox[0], bbox[1]]
-                        ]]
-                    }
-                };
-            });
+        if (!recentProjectsGeoJSON || !recentProjectsGeoJSON.features) {
+            console.log('No recent projects GeoJSON to render');
+            return;
+        }
+
+        // The mapResults contains Point features with projectId in properties
+        // Enhance them with project names from the results array
+        const projectMap = new Map(recentProjects.map(p => [p.projectId, p]));
+
+        const features = recentProjectsGeoJSON.features.map(f => {
+            const project = projectMap.get(f.properties.projectId);
+            return {
+                ...f,
+                properties: {
+                    ...f.properties,
+                    name: project?.name || `Project #${f.properties.projectId}`,
+                    status: project?.status || 'Unknown'
+                }
+            };
+        });
 
         map.getSource('recent-projects').setData({
             type: 'FeatureCollection',
             features: features
         });
+
+        console.log(`Rendered ${features.length} recent project markers on map`);
     }
 
     /**
@@ -598,8 +610,8 @@
         map.setLayoutProperty('tm-project-fill', 'visibility', visibility);
         map.setLayoutProperty('tm-project-outline', 'visibility', visibility);
         map.setLayoutProperty('tm-project-outline-dash', 'visibility', visibility);
-        map.setLayoutProperty('recent-projects-fill', 'visibility', visibility);
-        map.setLayoutProperty('recent-projects-outline', 'visibility', visibility);
+        map.setLayoutProperty('recent-projects-circles', 'visibility', visibility);
+        map.setLayoutProperty('recent-projects-labels', 'visibility', visibility);
     }
 
     /**

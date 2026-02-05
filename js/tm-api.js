@@ -6,7 +6,7 @@ const TmApi = {
     /**
      * Fetch recent TM projects
      * @param {number} limit - Number of projects to fetch
-     * @returns {Promise<Array>} List of recent projects
+     * @returns {Promise<Object>} Object with results array and mapResults GeoJSON
      */
     async fetchRecentProjects(limit = 20) {
         const apiUrl = `${CONFIG.tmApi.baseUrl}/projects/?orderBy=last_updated&orderByType=DESC&page=1&perPage=${limit}`;
@@ -29,24 +29,28 @@ const TmApi = {
             }
 
             const data = await response.json();
-            console.log('TM API response:', data);
+            console.log('TM API response keys:', Object.keys(data));
 
-            // Handle both possible response formats
-            const projects = data.results || data.mapResults || [];
-            console.log(`Found ${projects.length} projects`);
-
-            return projects.map(p => ({
+            // results is the project list for sidebar
+            const projects = (data.results || []).map(p => ({
                 projectId: p.projectId,
-                name: p.name || p.projectInfo?.name,
+                name: p.name,
                 status: p.status,
                 percentMapped: p.percentMapped,
                 percentValidated: p.percentValidated,
-                aoiBBOX: p.aoiBBOX,
-                lastUpdated: p.lastUpdated
+                lastUpdated: p.lastUpdated,
+                priority: p.priority
             }));
+
+            // mapResults is a GeoJSON FeatureCollection with centroids
+            const mapResults = data.mapResults || { type: 'FeatureCollection', features: [] };
+
+            console.log(`Found ${projects.length} projects, ${mapResults.features?.length || 0} map features`);
+
+            return { projects, mapResults };
         } catch (error) {
             console.error('Error fetching recent projects:', error);
-            return [];
+            return { projects: [], mapResults: { type: 'FeatureCollection', features: [] } };
         }
     },
 
