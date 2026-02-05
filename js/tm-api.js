@@ -10,24 +10,43 @@ const TmApi = {
      */
     async fetchRecentProjects(limit = 20) {
         const apiUrl = `${CONFIG.tmApi.baseUrl}/projects/?orderBy=last_updated&orderByType=DESC&page=1&perPage=${limit}`;
-        const url = CONFIG.tmApi.corsProxy
-            ? `${CONFIG.tmApi.corsProxy}${encodeURIComponent(apiUrl)}`
-            : apiUrl;
 
-        console.log('Fetching recent TM projects from:', url);
+        console.log('Fetching recent TM projects...');
+
+        // Try direct fetch first (TM API might support CORS now)
+        let response;
+        let usedProxy = false;
+
+        // Try multiple methods: direct, primary proxy, alternative proxy
+        const fetchMethods = [
+            { name: 'direct', url: apiUrl },
+            { name: 'corsproxy.io', url: `${CONFIG.tmApi.corsProxy}${encodeURIComponent(apiUrl)}` },
+            { name: 'allorigins', url: `${CONFIG.tmApi.corsProxyAlt}${encodeURIComponent(apiUrl)}` }
+        ];
+
+        for (const method of fetchMethods) {
+            try {
+                console.log(`Trying ${method.name}:`, method.url.substring(0, 80) + '...');
+                response = await fetch(method.url, {
+                    method: 'GET',
+                    headers: { 'Accept': 'application/json' }
+                });
+                console.log(`${method.name} response:`, response.status);
+
+                if (response.ok) {
+                    console.log(`Success with ${method.name}`);
+                    break;
+                }
+            } catch (err) {
+                console.log(`${method.name} failed:`, err.message);
+            }
+        }
+
+        if (!response || !response.ok) {
+            throw new Error('All fetch methods failed');
+        }
 
         try {
-            const response = await fetch(url, {
-                method: 'GET',
-                headers: {
-                    'Accept': 'application/json'
-                }
-            });
-
-            if (!response.ok) {
-                throw new Error(`API error: ${response.status}`);
-            }
-
             const data = await response.json();
             console.log('TM API response keys:', Object.keys(data));
 
@@ -42,14 +61,22 @@ const TmApi = {
                 priority: p.priority
             }));
 
-            // mapResults is a GeoJSON FeatureCollection with centroids
-            const mapResults = data.mapResults || { type: 'FeatureCollection', features: [] };
+            // mapResults is a GeoJSON FeatureCollection with ALL project centroids
+            // Filter to only include the projects from our results
+            const projectIds = new Set(projects.map(p => p.projectId));
+            const allMapResults = data.mapResults || { type: 'FeatureCollection', features: [] };
+            const mapResults = {
+                type: 'FeatureCollection',
+                features: (allMapResults.features || []).filter(f =>
+                    projectIds.has(f.properties?.projectId)
+                )
+            };
 
-            console.log(`Found ${projects.length} projects, ${mapResults.features?.length || 0} map features`);
+            console.log(`Found ${projects.length} projects, ${mapResults.features?.length || 0} map features (filtered from ${allMapResults.features?.length || 0})`);
 
             return { projects, mapResults };
-        } catch (error) {
-            console.error('Error fetching recent projects:', error);
+        } catch (parseError) {
+            console.error('Error parsing TM API response:', parseError);
             return { projects: [], mapResults: { type: 'FeatureCollection', features: [] } };
         }
     },
