@@ -58,9 +58,8 @@ const CONFIG = {
     tmApi: {
         baseUrl: 'https://tasking-manager-tm4-production-api.hotosm.org/api/v2',
         projectUrl: 'https://tasks.hotosm.org/projects',
-        // Custom Cloudflare Worker proxy (fast, reliable) - set this after deploying your worker
-        // Example: 'https://tm-proxy.your-subdomain.workers.dev'
-        workerProxy: null,
+        // Custom Cloudflare Worker proxy (fast, reliable)
+        workerProxy: 'https://tm-api.giovand.workers.dev',
         // Fallback CORS proxies (slower, less reliable)
         corsProxies: [
             'https://api.codetabs.com/v1/proxy?quest=',
