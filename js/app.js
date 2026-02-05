@@ -720,7 +720,7 @@
 
     /**
      * Update zoom warning visibility
-     * Three states: below display (<10), display-only (10-11), fetch enabled (12+)
+     * Three states: below display (<8), display-only (8-11), fetch enabled (12+)
      */
     function updateZoomWarning() {
         const zoom = map.getZoom();
@@ -731,17 +731,17 @@
             // At fetch level (12+) - can load new imagery, no warning needed
             zoomWarning.classList.add('hidden');
         } else if (zoom >= minDisplay) {
-            // Between display and fetch (10-11) - show cached data only
+            // Between display and fetch (8-11) - show cached data only
             zoomWarning.classList.remove('hidden');
             if (imageryFeatures.length > 0) {
-                zoomWarning.textContent = `Showing cached imagery. Zoom to ${minFetch}+ to load more.`;
+                zoomWarning.textContent = `Viewing cached imagery. Zoom to ${minFetch}+ to fetch new metadata.`;
             } else {
-                zoomWarning.textContent = `Zoom to ${minFetch}+ to load imagery metadata`;
+                zoomWarning.textContent = `Zoom to ${minFetch}+ to fetch imagery metadata`;
             }
         } else {
-            // Below display level (<10)
+            // Below display level (<8) - imagery hidden
             zoomWarning.classList.remove('hidden');
-            zoomWarning.textContent = `Zoom to ${minDisplay}+ to view imagery metadata`;
+            zoomWarning.textContent = `Zoom to ${minFetch}+ to fetch imagery metadata`;
         }
 
         // Also update project layer visibility

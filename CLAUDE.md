@@ -116,7 +116,7 @@ map: {
     center: [0, 20],
     zoom: 2,
     minZoomForImageryFetch: 12,    // ESRI API limit - can't fetch below this
-    minZoomForImageryDisplay: 10,  // Show existing data down to this level
+    minZoomForImageryDisplay: 8,   // Show cached data down to this level
     recentProjectsLimit: 100
 }
 ```
@@ -125,11 +125,11 @@ map: {
 
 The app uses separate thresholds for **fetching** vs **displaying** imagery:
 - **Fetch threshold (12)**: ESRI API's minimum zoom level for data
-- **Display threshold (10)**: Imagery footprints remain visible when zooming out
+- **Display threshold (8)**: Cached imagery footprints remain visible when zooming out
 
 This lets users see entire project areas with previously loaded footprints, even below ESRI's fetch limit. The `onMapMove()` function in `app.js` handles this with three cases:
-1. Below display (< 10): Clear all imagery
-2. Between display and fetch (10-11): Keep existing, don't fetch
+1. Below display (< 8): Clear all imagery
+2. Between display and fetch (8-11): Keep existing, don't fetch
 3. At/above fetch (12+): Fetch new imagery
 
 ## Brand Colors
@@ -142,7 +142,7 @@ This lets users see entire project areas with previously loaded footprints, even
 
 1. **ESRI query endpoint CORS**: Solved with identify endpoint fallback
 2. **Imagery dates showing "Unknown"**: Fixed by using correct field names from identify endpoint
-3. **ESRI zoom limit**: Can't fetch below zoom 12 - solved with two-threshold system (display at 10+)
+3. **ESRI zoom limit**: Can't fetch below zoom 12 - solved with two-threshold system (display cached at z8+)
 4. **TM API CORS/pagination**: Solved by using insta-tm S3 mirror instead of direct TM API
 
 ## Recent Changes (Feb 2026)
@@ -150,13 +150,13 @@ This lets users see entire project areas with previously loaded footprints, even
 ### Imagery Metadata Improvements
 - **Reduced API requests**: Grid density reduced from 265 to 85 points at z12 to avoid overwhelming ESRI servers
 - **Label deduplication**: Imagery labels now use centroid points, preventing duplicate/overlapping labels from multipolygon tiles
-- **Smart caching**: Imagery data persists in memory while navigating at z10+; users zoom to z12+ to load an area, then can zoom out to z10 to view it
-- **No fetching at z10-11**: Only displays cached data at these zoom levels (prevents excessive API requests)
+- **Smart caching**: Imagery data persists in memory while navigating at z8+; users zoom to z12+ to load an area, then can zoom out to z8 to view it
+- **No fetching at z8-11**: Only displays cached data at these zoom levels (prevents excessive API requests)
 - **Initial load fix**: Added `onMapMove()` call on map load to fetch imagery when page loads with hash coordinates
 
 ### Zoom Display Enhancement
-- Added separate `minZoomForImageryFetch` (12) and `minZoomForImageryDisplay` (10) thresholds
-- Imagery footprints now persist when zooming out from 12 to 10
+- Added separate `minZoomForImageryFetch` (12) and `minZoomForImageryDisplay` (8) thresholds
+- Imagery footprints now persist when zooming out from 12 to 8
 - Context-aware zoom warning messages guide users
 
 ### Layout Fixes

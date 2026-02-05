@@ -29,7 +29,7 @@ When creating map data in OpenStreetMap through Tasking Manager projects, we oft
 - **Basemap switcher**: Compare different imagery providers
 - **Age statistics**: View newest/oldest imagery dates for visible area
 - **URL deep-linking**: Share links to specific TM projects (e.g., `?project=17232`)
-- **Smart caching**: Imagery metadata persists when zooming out (down to z10)
+- **Smart caching**: Imagery metadata persists when zooming out (down to z8)
 
 ## Imagery Age Legend
 
@@ -47,7 +47,7 @@ When creating map data in OpenStreetMap through Tasking Manager projects, we oft
 3. Zoom to level 12+ to load imagery metadata
 4. Click on imagery tiles to see capture dates and details
 
-**Note**: Imagery loads at zoom 12+ but stays visible down to zoom 10 for context.
+**Note**: Imagery is fetched at zoom 12+ but cached data stays visible down to zoom 8.
 
 ## Tech Stack
 
@@ -73,7 +73,7 @@ Imagery metadata is fetched from ESRI's World Imagery MapServer using the **iden
 
 - Dual offset grids ensure complete coverage (primary grid + half-cell offset)
 - Grid density adapts to zoom level (25-85 sample points)
-- Results are cached in-memory while zoom remains ≥ 10
+- Results are cached in-memory while zoom remains ≥ 8
 - Label deduplication using centroids prevents overlapping text
 
 ## Deployment

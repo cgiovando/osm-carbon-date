@@ -8,7 +8,7 @@ const CONFIG = {
         center: [0, 20], // lon, lat - centered to show global coverage
         zoom: 2,
         minZoomForImageryFetch: 12, // Minimum zoom to fetch new imagery metadata (ESRI limit)
-        minZoomForImageryDisplay: 10, // Minimum zoom to display imagery metadata
+        minZoomForImageryDisplay: 8, // Minimum zoom to display cached imagery metadata
         recentProjectsLimit: 100 // Number of recent TM projects to load
     },
 
