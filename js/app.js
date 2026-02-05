@@ -174,29 +174,30 @@
             }
         });
 
-        // Imagery metadata fill (color-coded by age)
+        // Imagery metadata fill (semi-transparent)
         map.addLayer({
             id: 'imagery-fill',
             type: 'fill',
             source: 'imagery-metadata',
             paint: {
                 'fill-color': ['get', 'ageColor'],
-                'fill-opacity': 0.3
+                'fill-opacity': 0.15
             }
         });
 
-        // Imagery metadata outline
+        // Imagery metadata outline (yellow like reference app)
         map.addLayer({
             id: 'imagery-outline',
             type: 'line',
             source: 'imagery-metadata',
             paint: {
-                'line-color': ['get', 'ageColor'],
-                'line-width': 2
+                'line-color': '#ffff00',
+                'line-width': 1.5,
+                'line-opacity': 0.9
             }
         });
 
-        // Imagery date labels
+        // Imagery date labels (yellow with dark outline like reference app)
         map.addLayer({
             id: 'imagery-labels',
             type: 'symbol',
@@ -204,13 +205,13 @@
             layout: {
                 'text-field': ['get', 'formattedDate'],
                 'text-font': ['Open Sans Regular'],
-                'text-size': 11,
+                'text-size': 12,
                 'text-anchor': 'center',
-                'text-allow-overlap': false
+                'text-allow-overlap': true
             },
             paint: {
-                'text-color': '#000',
-                'text-halo-color': '#fff',
+                'text-color': '#ffff00',
+                'text-halo-color': '#000000',
                 'text-halo-width': 2
             }
         });
@@ -325,10 +326,13 @@
      * Load recent TM projects
      */
     async function loadRecentProjects() {
+        console.log('Loading recent TM projects...');
         try {
             const data = await TmApi.fetchRecentProjects(20);
-            recentProjects = data.projects;
-            recentProjectsGeoJSON = data.mapResults;
+            console.log('Received data:', data);
+            recentProjects = data.projects || [];
+            recentProjectsGeoJSON = data.mapResults || { type: 'FeatureCollection', features: [] };
+            console.log('Projects:', recentProjects.length, 'Map features:', recentProjectsGeoJSON.features?.length);
             renderRecentProjectsList();
             renderRecentProjectsOnMap();
         } catch (error) {
@@ -370,7 +374,10 @@
      * Render recent projects on map using centroid points from mapResults
      */
     function renderRecentProjectsOnMap() {
-        if (!recentProjectsGeoJSON || !recentProjectsGeoJSON.features) {
+        console.log('renderRecentProjectsOnMap called');
+        console.log('recentProjectsGeoJSON:', recentProjectsGeoJSON);
+
+        if (!recentProjectsGeoJSON || !recentProjectsGeoJSON.features || recentProjectsGeoJSON.features.length === 0) {
             console.log('No recent projects GeoJSON to render');
             return;
         }
@@ -390,6 +397,9 @@
                 }
             };
         });
+
+        console.log('Setting map source with features:', features.length);
+        console.log('First feature:', features[0]);
 
         map.getSource('recent-projects').setData({
             type: 'FeatureCollection',
@@ -470,6 +480,7 @@
             if (imageryFeatures.length > 0) {
                 imageryFeatures = [];
                 loadedImageryIds.clear();
+                ImagerySource.clearCache();
                 map.getSource('imagery-metadata').setData({
                     type: 'FeatureCollection',
                     features: []
