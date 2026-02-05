@@ -17,33 +17,23 @@ const TmApi = {
         let response;
         let usedProxy = false;
 
-        // Try multiple methods: direct, primary proxy, alternative proxy
-        const fetchMethods = [
-            { name: 'direct', url: apiUrl },
-            { name: 'corsproxy.io', url: `${CONFIG.tmApi.corsProxy}${encodeURIComponent(apiUrl)}` },
-            { name: 'allorigins', url: `${CONFIG.tmApi.corsProxyAlt}${encodeURIComponent(apiUrl)}` }
-        ];
+        // Use CORS proxy (allorigins) since TM API doesn't have CORS headers
+        const proxyUrl = `${CONFIG.tmApi.corsProxy}${encodeURIComponent(apiUrl)}`;
+        console.log('Fetching via proxy:', proxyUrl.substring(0, 80) + '...');
 
-        for (const method of fetchMethods) {
-            try {
-                console.log(`Trying ${method.name}:`, method.url.substring(0, 80) + '...');
-                response = await fetch(method.url, {
-                    method: 'GET',
-                    headers: { 'Accept': 'application/json' }
-                });
-                console.log(`${method.name} response:`, response.status);
+        try {
+            response = await fetch(proxyUrl, {
+                method: 'GET',
+                headers: { 'Accept': 'application/json' }
+            });
+            console.log('Proxy response status:', response.status);
 
-                if (response.ok) {
-                    console.log(`Success with ${method.name}`);
-                    break;
-                }
-            } catch (err) {
-                console.log(`${method.name} failed:`, err.message);
+            if (!response.ok) {
+                throw new Error(`Proxy returned ${response.status}`);
             }
-        }
-
-        if (!response || !response.ok) {
-            throw new Error('All fetch methods failed');
+        } catch (err) {
+            console.error('Fetch failed:', err.message);
+            throw err;
         }
 
         try {
