@@ -58,11 +58,13 @@ const CONFIG = {
     tmApi: {
         baseUrl: 'https://tasking-manager-tm4-production-api.hotosm.org/api/v2',
         projectUrl: 'https://tasks.hotosm.org/projects',
-        // CORS proxies for client-side requests (TM API doesn't have CORS headers)
-        // Multiple fallbacks for reliability
+        // Custom Cloudflare Worker proxy (fast, reliable) - set this after deploying your worker
+        // Example: 'https://tm-proxy.your-subdomain.workers.dev'
+        workerProxy: null,
+        // Fallback CORS proxies (slower, less reliable)
         corsProxies: [
-            'https://api.allorigins.win/raw?url=',
             'https://api.codetabs.com/v1/proxy?quest=',
+            'https://api.allorigins.win/raw?url=',
             'https://corsproxy.io/?'
         ]
     },

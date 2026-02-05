@@ -3,30 +3,75 @@
  */
 
 const TmApi = {
+    // Simple in-memory cache for project data
+    _cache: new Map(),
+    _cacheTimeout: 5 * 60 * 1000, // 5 minutes
+
+    /**
+     * Get cached data or null if expired/missing
+     */
+    _getCache(key) {
+        const cached = this._cache.get(key);
+        if (cached && Date.now() - cached.timestamp < this._cacheTimeout) {
+            console.log('Cache hit:', key);
+            return cached.data;
+        }
+        return null;
+    },
+
+    /**
+     * Set cache data
+     */
+    _setCache(key, data) {
+        this._cache.set(key, { data, timestamp: Date.now() });
+    },
     /**
      * Fetch recent TM projects
      * @param {number} limit - Number of projects to fetch
      * @returns {Promise<Object>} Object with results array and mapResults GeoJSON
      */
     async fetchRecentProjects(limit = 20) {
-        const apiUrl = `${CONFIG.tmApi.baseUrl}/projects/?orderBy=last_updated&orderByType=DESC&page=1&perPage=${limit}`;
+        const cacheKey = `projects-${limit}`;
+        const cached = this._getCache(cacheKey);
+        if (cached) return cached;
+
+        const apiPath = `/projects/?orderBy=last_updated&orderByType=DESC&page=1&perPage=${limit}`;
+        const apiUrl = `${CONFIG.tmApi.baseUrl}${apiPath}`;
 
         console.log('Fetching recent TM projects...');
 
-        // Try direct fetch first (in case CORS is supported), then proxies
-        const proxies = ['', ...CONFIG.tmApi.corsProxies]; // Empty string = direct fetch
+        // Build list of fetch options: worker proxy first, then CORS proxies
+        const fetchOptions = [];
+
+        // 1. Custom worker proxy (fastest if configured)
+        if (CONFIG.tmApi.workerProxy) {
+            fetchOptions.push({
+                url: `${CONFIG.tmApi.workerProxy}/api/v2${apiPath}`,
+                name: 'worker proxy',
+                timeout: 8000
+            });
+        }
+
+        // 2. Public CORS proxies (slower fallbacks)
+        for (const proxy of CONFIG.tmApi.corsProxies) {
+            fetchOptions.push({
+                url: `${proxy}${encodeURIComponent(apiUrl)}`,
+                name: proxy.substring(0, 25),
+                timeout: 12000
+            });
+        }
+
         let response;
         let lastError;
 
-        for (const proxy of proxies) {
-            const fetchUrl = proxy ? `${proxy}${encodeURIComponent(apiUrl)}` : apiUrl;
-            console.log('Trying:', proxy ? proxy.substring(0, 30) + '...' : 'direct fetch');
+        for (const opt of fetchOptions) {
+            console.log('Trying:', opt.name);
 
             try {
                 const controller = new AbortController();
-                const timeout = setTimeout(() => controller.abort(), 15000); // 15s timeout
+                const timeout = setTimeout(() => controller.abort(), opt.timeout);
 
-                response = await fetch(fetchUrl, {
+                response = await fetch(opt.url, {
                     method: 'GET',
                     headers: { 'Accept': 'application/json' },
                     signal: controller.signal
@@ -34,12 +79,12 @@ const TmApi = {
                 clearTimeout(timeout);
 
                 if (response.ok) {
-                    console.log('Success via:', proxy ? proxy.substring(0, 30) : 'direct');
+                    console.log('Success via:', opt.name);
                     break;
                 }
                 lastError = new Error(`Returned ${response.status}`);
             } catch (err) {
-                console.warn('Failed:', proxy ? proxy.substring(0, 30) : 'direct', err.message);
+                console.warn('Failed:', opt.name, err.message);
                 lastError = err;
                 response = null;
             }
@@ -78,7 +123,9 @@ const TmApi = {
 
             console.log(`Found ${projects.length} projects, ${mapResults.features?.length || 0} map features (filtered from ${allMapResults.features?.length || 0})`);
 
-            return { projects, mapResults };
+            const result = { projects, mapResults };
+            this._setCache(cacheKey, result);
+            return result;
         } catch (parseError) {
             console.error('Error parsing TM API response:', parseError);
             return { projects: [], mapResults: { type: 'FeatureCollection', features: [] } };
@@ -91,19 +138,42 @@ const TmApi = {
      * @returns {Promise<Object>} Project data with geometry
      */
     async fetchProject(projectId) {
-        const apiUrl = `${CONFIG.tmApi.baseUrl}/projects/${projectId}/`;
-        const proxies = ['', ...CONFIG.tmApi.corsProxies]; // Empty string = direct fetch
+        const cacheKey = `project-${projectId}`;
+        const cached = this._getCache(cacheKey);
+        if (cached) return cached;
+
+        const apiPath = `/projects/${projectId}/`;
+        const apiUrl = `${CONFIG.tmApi.baseUrl}${apiPath}`;
+
+        // Build fetch options: worker proxy first, then CORS proxies
+        const fetchOptions = [];
+
+        if (CONFIG.tmApi.workerProxy) {
+            fetchOptions.push({
+                url: `${CONFIG.tmApi.workerProxy}/api/v2${apiPath}`,
+                name: 'worker proxy',
+                timeout: 6000
+            });
+        }
+
+        for (const proxy of CONFIG.tmApi.corsProxies) {
+            fetchOptions.push({
+                url: `${proxy}${encodeURIComponent(apiUrl)}`,
+                name: proxy.substring(0, 25),
+                timeout: 10000
+            });
+        }
+
         let lastError;
 
-        for (const proxy of proxies) {
-            const fetchUrl = proxy ? `${proxy}${encodeURIComponent(apiUrl)}` : apiUrl;
-            console.log('Fetching project via:', proxy ? proxy.substring(0, 30) + '...' : 'direct');
+        for (const opt of fetchOptions) {
+            console.log('Fetching project via:', opt.name);
 
             try {
                 const controller = new AbortController();
-                const timeout = setTimeout(() => controller.abort(), 12000); // 12s timeout
+                const timeout = setTimeout(() => controller.abort(), opt.timeout);
 
-                const response = await fetch(fetchUrl, {
+                const response = await fetch(opt.url, {
                     method: 'GET',
                     headers: { 'Accept': 'application/json' },
                     signal: controller.signal
@@ -112,7 +182,9 @@ const TmApi = {
 
                 if (response.ok) {
                     const data = await response.json();
-                    return this.processProject(data);
+                    const result = this.processProject(data);
+                    this._setCache(cacheKey, result);
+                    return result;
                 }
 
                 if (response.status === 404) {
@@ -121,7 +193,7 @@ const TmApi = {
                 lastError = new Error(`API error: ${response.status}`);
             } catch (error) {
                 if (error.message.includes('not found')) throw error;
-                console.warn('Failed:', proxy ? proxy.substring(0, 30) : 'direct', error.message);
+                console.warn('Failed:', opt.name, error.message);
                 lastError = error;
             }
         }
