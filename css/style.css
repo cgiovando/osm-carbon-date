@@ -20,6 +20,11 @@ body {
     bottom: 0;
 }
 
+/* Move navigation control below header */
+.maplibregl-ctrl-top-left {
+    top: 70px;
+}
+
 /* Panels */
 .panel {
     position: absolute;
@@ -186,6 +191,37 @@ button:disabled {
 #zoom-warning.hidden {
     opacity: 0;
     pointer-events: none;
+}
+
+/* Imagery Loading Indicator */
+#imagery-loading {
+    bottom: 30px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(215, 63, 63, 0.9);
+    color: white;
+    font-size: 13px;
+    padding: 8px 16px;
+    border-radius: 20px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+#imagery-loading .loading {
+    border-color: rgba(255, 255, 255, 0.3);
+    border-top-color: white;
+}
+
+#imagery-loading.hidden {
+    display: none;
+}
+
+/* Label note */
+.label-note {
+    font-weight: normal;
+    color: #888;
+    font-size: 10px;
 }
 
 /* Info Panel */

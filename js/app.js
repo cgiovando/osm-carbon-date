@@ -26,6 +26,7 @@
     const statsPanel = document.getElementById('stats-panel');
     const statsContent = document.getElementById('stats-content');
     const recentProjectsList = document.getElementById('recent-projects-list');
+    const imageryLoading = document.getElementById('imagery-loading');
 
     /**
      * Initialize the map
@@ -64,7 +65,7 @@
             hash: false // We'll handle hash manually to include project
         });
 
-        map.addControl(new maplibregl.NavigationControl(), 'bottom-right');
+        map.addControl(new maplibregl.NavigationControl(), 'top-left');
         map.addControl(new maplibregl.ScaleControl(), 'bottom-left');
 
         map.on('load', () => {
@@ -141,21 +142,21 @@
      * Add map layers
      */
     function addMapLayers() {
-        // Recent projects as circles (centroids)
+        // Recent projects as circles (centroids) - HOT red
         map.addLayer({
             id: 'recent-projects-circles',
             type: 'circle',
             source: 'recent-projects',
             paint: {
                 'circle-radius': 8,
-                'circle-color': '#2563eb',
-                'circle-opacity': 0.8,
+                'circle-color': '#d73f3f',
+                'circle-opacity': 0.9,
                 'circle-stroke-color': '#ffffff',
                 'circle-stroke-width': 2
             }
         });
 
-        // Recent projects labels
+        // Recent projects labels - HOT red
         map.addLayer({
             id: 'recent-projects-labels',
             type: 'symbol',
@@ -168,7 +169,7 @@
                 'text-anchor': 'top'
             },
             paint: {
-                'text-color': '#1e40af',
+                'text-color': '#d73f3f',
                 'text-halo-color': '#ffffff',
                 'text-halo-width': 2
             }
@@ -328,7 +329,8 @@
     async function loadRecentProjects() {
         console.log('Loading recent TM projects...');
         try {
-            const data = await TmApi.fetchRecentProjects(20);
+            const limit = CONFIG.map.recentProjectsLimit || 100;
+            const data = await TmApi.fetchRecentProjects(limit);
             console.log('Received data:', data);
             recentProjects = data.projects || [];
             recentProjectsGeoJSON = data.mapResults || { type: 'FeatureCollection', features: [] };
@@ -534,6 +536,7 @@
         const zoom = map.getZoom();
         if (zoom < CONFIG.map.minZoomForImagery) {
             // Clear imagery when zoomed out
+            imageryLoading.classList.add('hidden');
             if (imageryFeatures.length > 0) {
                 imageryFeatures = [];
                 loadedImageryIds.clear();
@@ -558,31 +561,39 @@
         const imagerySource = imagerySourceSelect.value;
 
         if (imagerySource === 'esri') {
-            const data = await ImagerySource.fetchEsriMetadata(boundsArray, zoom);
+            // Show loading indicator
+            imageryLoading.classList.remove('hidden');
 
-            if (data.error) {
-                console.warn('Error loading imagery metadata:', data.message);
-                return;
-            }
+            try {
+                const data = await ImagerySource.fetchEsriMetadata(boundsArray, zoom);
 
-            if (data.features) {
-                // Add new features that we haven't loaded yet
-                const newFeatures = data.features.filter(f => {
-                    const id = f.properties.OBJECTID;
-                    if (loadedImageryIds.has(id)) return false;
-                    loadedImageryIds.add(id);
-                    return true;
-                });
+                if (data.error) {
+                    console.warn('Error loading imagery metadata:', data.message);
+                    return;
+                }
 
-                if (newFeatures.length > 0) {
-                    imageryFeatures = [...imageryFeatures, ...newFeatures];
-                    map.getSource('imagery-metadata').setData({
-                        type: 'FeatureCollection',
-                        features: imageryFeatures
+                if (data.features) {
+                    // Add new features that we haven't loaded yet
+                    const newFeatures = data.features.filter(f => {
+                        const id = f.properties.OBJECTID;
+                        if (loadedImageryIds.has(id)) return false;
+                        loadedImageryIds.add(id);
+                        return true;
                     });
 
-                    updateStats();
+                    if (newFeatures.length > 0) {
+                        imageryFeatures = [...imageryFeatures, ...newFeatures];
+                        map.getSource('imagery-metadata').setData({
+                            type: 'FeatureCollection',
+                            features: imageryFeatures
+                        });
+
+                        updateStats();
+                    }
                 }
+            } finally {
+                // Hide loading indicator
+                imageryLoading.classList.add('hidden');
             }
         }
     }

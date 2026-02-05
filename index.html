@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>osm-carbon-date — Imagery Age Finder for HOT TM</title>
+    <title>osm-carbon-date — Imagery Age Finder for Tasking Manager</title>
     <link href="https://unpkg.com/maplibre-gl@4.1.0/dist/maplibre-gl.css" rel="stylesheet" />
     <link rel="stylesheet" href="css/style.css">
 </head>
@@ -62,7 +62,7 @@
 
         <!-- Recent Projects -->
         <div class="control-group">
-            <label>Recent TM Projects</label>
+            <label>Recent TM Projects <span class="label-note">(100 most recent)</span></label>
             <div id="recent-projects-list" class="recent-projects-list">
                 <div class="loading-text">Loading...</div>
             </div>
@@ -93,6 +93,12 @@
     <!-- Zoom Warning -->
     <div id="zoom-warning" class="panel">
         Zoom in to level 12+ to load imagery metadata
+    </div>
+
+    <!-- Imagery Loading Indicator -->
+    <div id="imagery-loading" class="panel hidden">
+        <span class="loading"></span>
+        <span>Loading imagery metadata...</span>
     </div>
 
     <!-- Info Panel (for TM project details) -->

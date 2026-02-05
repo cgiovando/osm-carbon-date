@@ -5,9 +5,10 @@
 const CONFIG = {
     // Default map settings
     map: {
-        center: [0, 20], // lon, lat - centered on Africa (common HOT focus)
-        zoom: 3,
-        minZoomForImagery: 12 // Minimum zoom to load imagery metadata
+        center: [0, 20], // lon, lat - centered to show global coverage
+        zoom: 2,
+        minZoomForImagery: 12, // Minimum zoom to load imagery metadata
+        recentProjectsLimit: 100 // Number of recent TM projects to load
     },
 
     // Basemap definitions
