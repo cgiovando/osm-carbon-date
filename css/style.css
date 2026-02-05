@@ -20,9 +20,10 @@ body {
     bottom: 0;
 }
 
-/* Position navigation control above legend and stats */
-.maplibregl-ctrl-bottom-right {
-    bottom: 270px;
+/* Attribution control styling */
+.maplibregl-ctrl-attrib {
+    background: rgba(255, 255, 255, 0.8) !important;
+    font-size: 10px;
 }
 
 /* Panels */
@@ -155,7 +156,7 @@ button:disabled {
 
 /* Legend */
 #legend {
-    bottom: 160px;
+    bottom: 180px;
     right: 10px;
     min-width: 120px;
 }
@@ -305,7 +306,7 @@ button:disabled {
 
 /* Stats Panel */
 #stats-panel {
-    bottom: 30px;
+    bottom: 40px;
     right: 10px;
     min-width: 200px;
 }
