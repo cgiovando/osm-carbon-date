@@ -14,6 +14,8 @@ const TmApi = {
             ? `${CONFIG.tmApi.corsProxy}${encodeURIComponent(apiUrl)}`
             : apiUrl;
 
+        console.log('Fetching recent TM projects from:', url);
+
         try {
             const response = await fetch(url, {
                 method: 'GET',
@@ -27,9 +29,15 @@ const TmApi = {
             }
 
             const data = await response.json();
-            return (data.results || []).map(p => ({
+            console.log('TM API response:', data);
+
+            // Handle both possible response formats
+            const projects = data.results || data.mapResults || [];
+            console.log(`Found ${projects.length} projects`);
+
+            return projects.map(p => ({
                 projectId: p.projectId,
-                name: p.name,
+                name: p.name || p.projectInfo?.name,
                 status: p.status,
                 percentMapped: p.percentMapped,
                 percentValidated: p.percentValidated,

@@ -329,11 +329,16 @@
     function renderRecentProjectsList() {
         if (!recentProjectsList) return;
 
+        if (recentProjects.length === 0) {
+            recentProjectsList.innerHTML = '<div class="loading-text">No projects found</div>';
+            return;
+        }
+
         recentProjectsList.innerHTML = recentProjects.map(project => `
             <div class="recent-project-item" data-project-id="${project.projectId}">
                 <div class="project-id">#${project.projectId}</div>
                 <div class="project-name">${project.name || 'Untitled'}</div>
-                <div class="project-status status-${(project.status || '').toLowerCase()}">${project.status}</div>
+                <div class="project-status status-${(project.status || '').toLowerCase()}">${project.status || 'Unknown'}</div>
             </div>
         `).join('');
 
@@ -449,6 +454,16 @@
 
         const zoom = map.getZoom();
         if (zoom < CONFIG.map.minZoomForImagery) {
+            // Clear imagery when zoomed out
+            if (imageryFeatures.length > 0) {
+                imageryFeatures = [];
+                loadedImageryIds.clear();
+                map.getSource('imagery-metadata').setData({
+                    type: 'FeatureCollection',
+                    features: []
+                });
+                statsPanel.classList.add('hidden');
+            }
             return;
         }
 
@@ -468,6 +483,12 @@
             if (data.error) {
                 console.warn('Error loading imagery metadata:', data.message);
                 return;
+            }
+
+            if (data.warning) {
+                // Show warning in zoom warning element
+                zoomWarning.textContent = data.warning;
+                zoomWarning.classList.remove('hidden');
             }
 
             if (data.features) {

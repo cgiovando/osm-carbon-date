@@ -67,102 +67,122 @@ const ImagerySource = {
     },
 
     /**
-     * Fetch ESRI imagery metadata using the identify endpoint
-     * This works without CORS issues unlike the query endpoint
+     * Convert lat/lon to Web Mercator (EPSG:3857)
+     */
+    toWebMercator(lon, lat) {
+        const x = lon * 20037508.34 / 180;
+        let y = Math.log(Math.tan((90 + lat) * Math.PI / 360)) / (Math.PI / 180);
+        y = y * 20037508.34 / 180;
+        return [x, y];
+    },
+
+    /**
+     * Convert Web Mercator to lat/lon
+     */
+    fromWebMercator(x, y) {
+        const lon = x * 180 / 20037508.34;
+        const lat = (Math.atan(Math.exp(y * Math.PI / 20037508.34)) * 360 / Math.PI) - 90;
+        return [lon, lat];
+    },
+
+    /**
+     * Fetch ESRI imagery metadata using the query endpoint
+     * Uses CORS proxy since query endpoint doesn't have CORS headers
      * @param {Array} bounds - [west, south, east, north] in EPSG:4326
      * @param {number} zoom - current zoom level
      * @returns {Promise<Object>} GeoJSON FeatureCollection with date info
      */
     async fetchEsriMetadata(bounds, zoom) {
         // Convert to Web Mercator (EPSG:3857) for ESRI API
-        const toWebMercator = (lon, lat) => {
-            const x = lon * 20037508.34 / 180;
-            let y = Math.log(Math.tan((90 + lat) * Math.PI / 360)) / (Math.PI / 180);
-            y = y * 20037508.34 / 180;
-            return [x, y];
-        };
+        const [minX, minY] = this.toWebMercator(bounds[0], bounds[1]);
+        const [maxX, maxY] = this.toWebMercator(bounds[2], bounds[3]);
 
-        const [minX, minY] = toWebMercator(bounds[0], bounds[1]);
-        const [maxX, maxY] = toWebMercator(bounds[2], bounds[3]);
-
-        // Calculate center point for identify
-        const centerX = (minX + maxX) / 2;
-        const centerY = (minY + maxY) / 2;
-
-        // Build identify request - this endpoint works without CORS issues
-        const params = new URLSearchParams({
+        // Build query - first get count to avoid loading too many features
+        const baseParams = {
             f: 'json',
-            geometryType: 'esriGeometryPoint',
+            geometryType: 'esriGeometryEnvelope',
             geometry: JSON.stringify({
-                x: centerX,
-                y: centerY,
+                xmin: minX, ymin: minY, xmax: maxX, ymax: maxY,
                 spatialReference: { wkid: 102100 }
             }),
-            mapExtent: `${minX},${minY},${maxX},${maxY}`,
-            imageDisplay: '256,256,96',
-            tolerance: 0,
-            layers: 'visible:0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18',
-            returnGeometry: 'true'
-        });
-
-        const url = `${CONFIG.esri.identifyUrl}?${params}`;
+            spatialRel: 'esriSpatialRelIntersects',
+            inSR: 102100,
+            outSR: 4326 // Return geometry in lat/lon for MapLibre
+        };
 
         try {
-            const response = await fetch(url);
+            // First, get count to ensure we don't overload
+            const countParams = new URLSearchParams({
+                ...baseParams,
+                returnCountOnly: 'true'
+            });
+
+            const countUrl = `${CONFIG.esri.corsProxy}${encodeURIComponent(CONFIG.esri.queryUrl + '?' + countParams)}`;
+            const countResponse = await fetch(countUrl);
+            const countData = await countResponse.json();
+
+            if (countData.count > 200) {
+                console.log(`Too many features (${countData.count}), zoom in more`);
+                return {
+                    type: 'FeatureCollection',
+                    features: [],
+                    warning: `Too many imagery tiles (${countData.count}). Zoom in for details.`
+                };
+            }
+
+            // Get all features with geometry
+            const queryParams = new URLSearchParams({
+                ...baseParams,
+                outFields: 'OBJECTID,SRC_DATE,SRC_RES,SRC_ACC,NICE_NAME,NICE_DESC',
+                returnGeometry: 'true'
+            });
+
+            const queryUrl = `${CONFIG.esri.corsProxy}${encodeURIComponent(CONFIG.esri.queryUrl + '?' + queryParams)}`;
+            const response = await fetch(queryUrl);
+
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}`);
             }
 
             const data = await response.json();
 
-            // Process results - filter to get the most relevant layer based on zoom
-            // Layer 0 is the main imagery metadata layer
-            const features = [];
-            const seenIds = new Set();
+            if (data.error) {
+                throw new Error(data.error.message || 'ESRI API error');
+            }
 
-            for (const result of (data.results || [])) {
-                // Skip if no geometry or already seen this object
-                if (!result.geometry || seenIds.has(result.attributes?.OBJECTID)) continue;
-                seenIds.add(result.attributes?.OBJECTID);
-
-                // Get the date from SRC_DATE or DATE field
-                const srcDate = result.attributes?.SRC_DATE ||
-                               result.attributes?.['DATE (YYYYMMDD)'] ||
-                               result.attributes?.DATE;
-
+            // Convert ESRI features to GeoJSON
+            const features = (data.features || []).map(f => {
+                const srcDate = f.attributes?.SRC_DATE;
                 const parsedDate = this.parseEsriDate(srcDate);
 
                 // Convert ESRI geometry to GeoJSON
                 let geometry = null;
-                if (result.geometry.rings) {
+                if (f.geometry?.rings) {
                     geometry = {
                         type: 'Polygon',
-                        coordinates: result.geometry.rings
+                        coordinates: f.geometry.rings
                     };
                 }
 
-                if (geometry) {
-                    features.push({
-                        type: 'Feature',
-                        properties: {
-                            OBJECTID: result.attributes?.OBJECTID,
-                            SRC_DATE: srcDate,
-                            SRC_RES: result.attributes?.SRC_RES || result.attributes?.['RESOLUTION (M)'],
-                            SRC_ACC: result.attributes?.SRC_ACC || result.attributes?.['ACCURACY (M)'],
-                            NICE_NAME: result.attributes?.NICE_NAME || result.attributes?.SOURCE_INFO,
-                            NICE_DESC: result.attributes?.NICE_DESC || result.attributes?.SOURCE,
-                            layerName: result.layerName,
-                            parsedDate: parsedDate,
-                            formattedDate: this.formatDate(parsedDate),
-                            ageYears: this.getAgeInYears(parsedDate),
-                            ageColor: this.getAgeColor(parsedDate),
-                            ageClass: this.getAgeClass(parsedDate),
-                            source: 'ESRI World Imagery'
-                        },
-                        geometry: geometry
-                    });
-                }
-            }
+                return {
+                    type: 'Feature',
+                    properties: {
+                        OBJECTID: f.attributes?.OBJECTID,
+                        SRC_DATE: srcDate,
+                        SRC_RES: f.attributes?.SRC_RES,
+                        SRC_ACC: f.attributes?.SRC_ACC,
+                        NICE_NAME: f.attributes?.NICE_NAME,
+                        NICE_DESC: f.attributes?.NICE_DESC,
+                        parsedDate: parsedDate,
+                        formattedDate: this.formatDate(parsedDate),
+                        ageYears: this.getAgeInYears(parsedDate),
+                        ageColor: this.getAgeColor(parsedDate),
+                        ageClass: this.getAgeClass(parsedDate),
+                        source: 'ESRI World Imagery'
+                    },
+                    geometry: geometry
+                };
+            }).filter(f => f.geometry !== null);
 
             return {
                 type: 'FeatureCollection',

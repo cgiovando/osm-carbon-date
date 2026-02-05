@@ -62,8 +62,12 @@ const CONFIG = {
         corsProxy: 'https://corsproxy.io/?'
     },
 
-    // ESRI API - using identify endpoint which works without CORS issues
+    // ESRI API
     esri: {
-        identifyUrl: 'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/identify'
+        identifyUrl: 'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/identify',
+        // Layer 0 is the imagery footprints layer
+        queryUrl: 'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/0/query',
+        // Use CORS proxy for query endpoint
+        corsProxy: 'https://corsproxy.io/?'
     }
 };
