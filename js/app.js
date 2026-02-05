@@ -174,43 +174,43 @@
             }
         });
 
-        // Imagery metadata fill (semi-transparent)
+        // Imagery metadata fill (age-based colors)
         map.addLayer({
             id: 'imagery-fill',
             type: 'fill',
             source: 'imagery-metadata',
             paint: {
                 'fill-color': ['get', 'ageColor'],
-                'fill-opacity': 0.15
+                'fill-opacity': 0.35
             }
         });
 
-        // Imagery metadata outline (yellow like reference app)
+        // Imagery metadata outline (age-based colors)
         map.addLayer({
             id: 'imagery-outline',
             type: 'line',
             source: 'imagery-metadata',
             paint: {
-                'line-color': '#ffff00',
-                'line-width': 1.5,
-                'line-opacity': 0.9
+                'line-color': ['get', 'ageColor'],
+                'line-width': 2.5,
+                'line-opacity': 1
             }
         });
 
-        // Imagery date labels (yellow with dark outline like reference app)
+        // Imagery date labels (age-based colors with dark outline)
         map.addLayer({
             id: 'imagery-labels',
             type: 'symbol',
             source: 'imagery-metadata',
             layout: {
                 'text-field': ['get', 'formattedDate'],
-                'text-font': ['Open Sans Regular'],
-                'text-size': 12,
+                'text-font': ['Open Sans Bold'],
+                'text-size': 13,
                 'text-anchor': 'center',
                 'text-allow-overlap': true
             },
             paint: {
-                'text-color': '#ffff00',
+                'text-color': ['get', 'ageColor'],
                 'text-halo-color': '#000000',
                 'text-halo-width': 2
             }
