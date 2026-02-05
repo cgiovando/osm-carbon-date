@@ -35,101 +35,123 @@ const TmApi = {
         const cached = this._getCache(cacheKey);
         if (cached) return cached;
 
-        const apiPath = `/projects/?orderBy=last_updated&orderByType=DESC&page=1&perPage=${limit}`;
-        const apiUrl = `${CONFIG.tmApi.baseUrl}${apiPath}`;
+        console.log(`Fetching recent TM projects (target: ${limit})...`);
 
-        console.log('Fetching recent TM projects...');
+        // TM API has a max of ~14 results per page, so we need to fetch multiple pages
+        const perPage = 14; // API's actual limit
+        const pagesToFetch = Math.ceil(limit / perPage);
 
-        // Build list of fetch options: worker proxy first, then CORS proxies
-        const fetchOptions = [];
+        let allProjects = [];
+        let allMapFeatures = [];
 
-        // 1. Custom worker proxy (fastest if configured)
-        if (CONFIG.tmApi.workerProxy) {
-            fetchOptions.push({
-                url: `${CONFIG.tmApi.workerProxy}/api/v2${apiPath}`,
-                name: 'worker proxy',
-                timeout: 8000
-            });
-        }
+        for (let page = 1; page <= pagesToFetch && allProjects.length < limit; page++) {
+            const apiPath = `/projects/?orderBy=last_updated&orderByType=DESC&page=${page}&perPage=${perPage}`;
+            const apiUrl = `${CONFIG.tmApi.baseUrl}${apiPath}`;
 
-        // 2. Public CORS proxies (slower fallbacks)
-        for (const proxy of CONFIG.tmApi.corsProxies) {
-            fetchOptions.push({
-                url: `${proxy}${encodeURIComponent(apiUrl)}`,
-                name: proxy.substring(0, 25),
-                timeout: 12000
-            });
-        }
+            // Build list of fetch options: worker proxy first, then CORS proxies
+            const fetchOptions = [];
 
-        let response;
-        let lastError;
+            if (CONFIG.tmApi.workerProxy) {
+                fetchOptions.push({
+                    url: `${CONFIG.tmApi.workerProxy}/api/v2${apiPath}`,
+                    name: 'worker proxy',
+                    timeout: 8000
+                });
+            }
 
-        for (const opt of fetchOptions) {
-            console.log('Trying:', opt.name);
+            for (const proxy of CONFIG.tmApi.corsProxies) {
+                fetchOptions.push({
+                    url: `${proxy}${encodeURIComponent(apiUrl)}`,
+                    name: proxy.substring(0, 25),
+                    timeout: 12000
+                });
+            }
+
+            let response;
+            let lastError;
+
+            for (const opt of fetchOptions) {
+                if (page === 1) console.log('Trying:', opt.name);
+
+                try {
+                    const controller = new AbortController();
+                    const timeout = setTimeout(() => controller.abort(), opt.timeout);
+
+                    response = await fetch(opt.url, {
+                        method: 'GET',
+                        headers: { 'Accept': 'application/json' },
+                        signal: controller.signal
+                    });
+                    clearTimeout(timeout);
+
+                    if (response.ok) {
+                        if (page === 1) console.log('Success via:', opt.name);
+                        break;
+                    }
+                    lastError = new Error(`Returned ${response.status}`);
+                } catch (err) {
+                    if (page === 1) console.warn('Failed:', opt.name, err.message);
+                    lastError = err;
+                    response = null;
+                }
+            }
+
+            if (!response || !response.ok) {
+                if (page === 1) {
+                    console.error('All fetch methods failed');
+                    throw lastError || new Error('Failed to fetch projects');
+                }
+                break; // Stop pagination if later pages fail
+            }
 
             try {
-                const controller = new AbortController();
-                const timeout = setTimeout(() => controller.abort(), opt.timeout);
+                const data = await response.json();
 
-                response = await fetch(opt.url, {
-                    method: 'GET',
-                    headers: { 'Accept': 'application/json' },
-                    signal: controller.signal
-                });
-                clearTimeout(timeout);
+                // Add projects from this page
+                const pageProjects = (data.results || []).map(p => ({
+                    projectId: p.projectId,
+                    name: p.name,
+                    status: p.status,
+                    percentMapped: p.percentMapped,
+                    percentValidated: p.percentValidated,
+                    lastUpdated: p.lastUpdated,
+                    priority: p.priority
+                }));
 
-                if (response.ok) {
-                    console.log('Success via:', opt.name);
-                    break;
-                }
-                lastError = new Error(`Returned ${response.status}`);
-            } catch (err) {
-                console.warn('Failed:', opt.name, err.message);
-                lastError = err;
-                response = null;
+                allProjects = allProjects.concat(pageProjects);
+
+                // Get map features for this page's projects
+                const pageProjectIds = new Set(pageProjects.map(p => p.projectId));
+                const pageMapResults = data.mapResults || { type: 'FeatureCollection', features: [] };
+                const pageFeatures = (pageMapResults.features || []).filter(f =>
+                    pageProjectIds.has(f.properties?.projectId)
+                );
+                allMapFeatures = allMapFeatures.concat(pageFeatures);
+
+                console.log(`Page ${page}: ${pageProjects.length} projects (total: ${allProjects.length})`);
+
+                // Check if there are more pages
+                if (!data.pagination?.hasNext) break;
+
+            } catch (parseError) {
+                console.error('Error parsing TM API response:', parseError);
+                break;
             }
         }
 
-        if (!response || !response.ok) {
-            console.error('All fetch methods failed');
-            throw lastError || new Error('Failed to fetch projects');
-        }
+        // Trim to exact limit
+        const projects = allProjects.slice(0, limit);
+        const projectIds = new Set(projects.map(p => p.projectId));
+        const mapResults = {
+            type: 'FeatureCollection',
+            features: allMapFeatures.filter(f => projectIds.has(f.properties?.projectId))
+        };
 
-        try {
-            const data = await response.json();
-            console.log('TM API response keys:', Object.keys(data));
+        console.log(`Final: ${projects.length} projects, ${mapResults.features.length} map features`);
 
-            // results is the project list for sidebar
-            const projects = (data.results || []).map(p => ({
-                projectId: p.projectId,
-                name: p.name,
-                status: p.status,
-                percentMapped: p.percentMapped,
-                percentValidated: p.percentValidated,
-                lastUpdated: p.lastUpdated,
-                priority: p.priority
-            }));
-
-            // mapResults is a GeoJSON FeatureCollection with ALL project centroids
-            // Filter to only include the projects from our results
-            const projectIds = new Set(projects.map(p => p.projectId));
-            const allMapResults = data.mapResults || { type: 'FeatureCollection', features: [] };
-            const mapResults = {
-                type: 'FeatureCollection',
-                features: (allMapResults.features || []).filter(f =>
-                    projectIds.has(f.properties?.projectId)
-                )
-            };
-
-            console.log(`Found ${projects.length} projects, ${mapResults.features?.length || 0} map features (filtered from ${allMapResults.features?.length || 0})`);
-
-            const result = { projects, mapResults };
-            this._setCache(cacheKey, result);
-            return result;
-        } catch (parseError) {
-            console.error('Error parsing TM API response:', parseError);
-            return { projects: [], mapResults: { type: 'FeatureCollection', features: [] } };
-        }
+        const result = { projects, mapResults };
+        this._setCache(cacheKey, result);
+        return result;
     },
 
     /**
