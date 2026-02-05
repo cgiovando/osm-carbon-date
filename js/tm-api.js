@@ -13,20 +13,20 @@ const TmApi = {
 
         console.log('Fetching recent TM projects...');
 
-        // Try with primary proxy, then fallback
-        const proxies = [CONFIG.tmApi.corsProxy, CONFIG.tmApi.corsProxyAlt];
+        // Try direct fetch first (in case CORS is supported), then proxies
+        const proxies = ['', ...CONFIG.tmApi.corsProxies]; // Empty string = direct fetch
         let response;
         let lastError;
 
         for (const proxy of proxies) {
-            const proxyUrl = `${proxy}${encodeURIComponent(apiUrl)}`;
-            console.log('Trying proxy:', proxy.substring(0, 30) + '...');
+            const fetchUrl = proxy ? `${proxy}${encodeURIComponent(apiUrl)}` : apiUrl;
+            console.log('Trying:', proxy ? proxy.substring(0, 30) + '...' : 'direct fetch');
 
             try {
                 const controller = new AbortController();
-                const timeout = setTimeout(() => controller.abort(), 10000); // 10s timeout
+                const timeout = setTimeout(() => controller.abort(), 15000); // 15s timeout
 
-                response = await fetch(proxyUrl, {
+                response = await fetch(fetchUrl, {
                     method: 'GET',
                     headers: { 'Accept': 'application/json' },
                     signal: controller.signal
@@ -34,19 +34,19 @@ const TmApi = {
                 clearTimeout(timeout);
 
                 if (response.ok) {
-                    console.log('Proxy succeeded:', proxy.substring(0, 30));
+                    console.log('Success via:', proxy ? proxy.substring(0, 30) : 'direct');
                     break;
                 }
-                lastError = new Error(`Proxy returned ${response.status}`);
+                lastError = new Error(`Returned ${response.status}`);
             } catch (err) {
-                console.warn('Proxy failed:', proxy.substring(0, 30), err.message);
+                console.warn('Failed:', proxy ? proxy.substring(0, 30) : 'direct', err.message);
                 lastError = err;
                 response = null;
             }
         }
 
         if (!response || !response.ok) {
-            console.error('All proxies failed');
+            console.error('All fetch methods failed');
             throw lastError || new Error('Failed to fetch projects');
         }
 
@@ -92,19 +92,18 @@ const TmApi = {
      */
     async fetchProject(projectId) {
         const apiUrl = `${CONFIG.tmApi.baseUrl}/projects/${projectId}/`;
-        const proxies = [CONFIG.tmApi.corsProxy, CONFIG.tmApi.corsProxyAlt];
-        let response;
+        const proxies = ['', ...CONFIG.tmApi.corsProxies]; // Empty string = direct fetch
         let lastError;
 
         for (const proxy of proxies) {
-            const proxyUrl = `${proxy}${encodeURIComponent(apiUrl)}`;
-            console.log('Fetching project via:', proxy.substring(0, 30) + '...');
+            const fetchUrl = proxy ? `${proxy}${encodeURIComponent(apiUrl)}` : apiUrl;
+            console.log('Fetching project via:', proxy ? proxy.substring(0, 30) + '...' : 'direct');
 
             try {
                 const controller = new AbortController();
-                const timeout = setTimeout(() => controller.abort(), 8000); // 8s timeout
+                const timeout = setTimeout(() => controller.abort(), 12000); // 12s timeout
 
-                response = await fetch(proxyUrl, {
+                const response = await fetch(fetchUrl, {
                     method: 'GET',
                     headers: { 'Accept': 'application/json' },
                     signal: controller.signal
@@ -122,12 +121,12 @@ const TmApi = {
                 lastError = new Error(`API error: ${response.status}`);
             } catch (error) {
                 if (error.message.includes('not found')) throw error;
-                console.warn('Proxy failed:', proxy.substring(0, 30), error.message);
+                console.warn('Failed:', proxy ? proxy.substring(0, 30) : 'direct', error.message);
                 lastError = error;
             }
         }
 
-        console.error('All proxies failed for project:', projectId);
+        console.error('All fetch methods failed for project:', projectId);
         throw lastError || new Error('Failed to fetch project');
     },
 

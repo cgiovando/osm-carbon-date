@@ -59,9 +59,12 @@ const CONFIG = {
         baseUrl: 'https://tasking-manager-tm4-production-api.hotosm.org/api/v2',
         projectUrl: 'https://tasks.hotosm.org/projects',
         // CORS proxies for client-side requests (TM API doesn't have CORS headers)
-        // allorigins is more reliable, so use it as primary
-        corsProxy: 'https://api.allorigins.win/raw?url=',
-        corsProxyAlt: 'https://corsproxy.io/?'
+        // Multiple fallbacks for reliability
+        corsProxies: [
+            'https://api.allorigins.win/raw?url=',
+            'https://api.codetabs.com/v1/proxy?quest=',
+            'https://corsproxy.io/?'
+        ]
     },
 
     // ESRI API - using identify endpoint which returns geometry and works without CORS issues
