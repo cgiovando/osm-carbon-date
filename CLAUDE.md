@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**osm-carbon-date** is a web app that helps Tasking Manager project creators visualize ESRI satellite imagery dates. It overlays TM project boundaries with imagery metadata footprints, color-coded by age.
+**osm-carbon-date** is a web app that helps Tasking Manager project creators visualize satellite imagery dates from ESRI World Imagery and OpenAerialMap. It overlays TM project boundaries with imagery metadata footprints, color-coded by age.
 
 **Live app**: https://cgiovando.github.io/osm-carbon-date/
 
@@ -21,6 +21,7 @@
 | `js/app.js` | Main application logic, map initialization, event handlers |
 | `js/tm-api.js` | Tasking Manager API integration via insta-tm |
 | `js/imagery-sources.js` | ESRI imagery metadata fetching via identify endpoint |
+| `js/oam-source.js` | OpenAerialMap data loading, thumbnails, feature selection |
 | `css/style.css` | All styling |
 | `index.html` | Single page app structure |
 
@@ -49,11 +50,9 @@ The app uses **PMTiles** (cloud-native vector tiles) for efficient rendering of 
 - **Zoom range**: 0-12 (tiles generated with tippecanoe)
 
 **Layer visibility logic:**
-- At low zoom (global view): Circle markers + PMTiles polygons visible
-- At medium zoom (6+): PMTiles polygons become clearly visible
-- At high zoom (10+) with selected project: PMTiles and circles hide, only selected project boundary shown
-
-This enables smooth exploration of all TM projects worldwide without downloading the full GeoJSON.
+- At low zoom (global view): PMTiles polygons visible
+- At medium zoom (6+): PMTiles polygons + labels become clearly visible
+- At high zoom (10+) with selected project: PMTiles hide, only selected project boundary shown
 
 ### ESRI Imagery Metadata
 
@@ -70,7 +69,32 @@ This enables smooth exploration of all TM projects worldwide without downloading
   - Secondary grid: Offset by half-cell to catch tiles between primary points
   - Grid density by zoom: z15+ (25 pts), z14 (41 pts), z13 (61 pts), z12 (85 pts)
 - **Label deduplication**: Imagery labels use centroid points (one per tile) to avoid duplicate labels from multipolygons
-- **Caching**: Loaded imagery persists in memory while zoom stays at 10+; only clears when zooming below 10
+- **Caching**: Loaded imagery persists in memory while zoom stays at 8+; only clears when zooming below 8
+
+### OpenAerialMap (OAM) Integration
+
+OAM imagery is an **alternative source** to ESRI, selected via a dropdown (mutually exclusive). Data comes from a static S3 mirror of the OAM catalog:
+- **S3 Base URL**: `https://cgiovando-oam-api.s3.us-east-1.amazonaws.com`
+- **All images GeoJSON**: `{s3Base}/all_images.geojson` (~20k footprints)
+- **PMTiles**: `{s3Base}/images.pmtiles` (exists but not displayed — contains unfiltered oversized images)
+
+**Zoom behavior:**
+
+| Zoom | Footprints (GeoJSON) | Thumbnails |
+|------|---------------------|------------|
+| 0-7 | Hidden | None |
+| 8+ | Age-colored outlines + labels | Yes (max 50) |
+
+**Key implementation details:**
+- **Mutually exclusive**: ESRI and OAM are selected via a `<select>` dropdown — only one active at a time
+- **Lazy loading**: OAM data loads only when first selected (one-time fetch of `all_images.geojson`)
+- **Oversized image filter**: Images with bbox area > 1 deg² (~111x111km) are filtered out during loading (removes ~42 mosaics/composites)
+- **Viewport filtering**: All ~20k features are filtered client-side to the current viewport bbox
+- **Thumbnails**: Added as MapLibre `image` sources, bbox-aligned. Max 50 concurrent. Failed thumbnails (404s) are silently removed via `map.on('error')` handler.
+- **Light footprint fill**: Fill opacity 0.08 so thumbnails show through clearly
+- **TMS disabled**: OAM TMS tiles (`tiles.openaerialmap.org`) block cross-origin requests. TMS code paths exist but are disabled. Future: self-hosted titiler on Lambda.
+- **URL sanitization**: All OAM URLs converted from `http://` to `https://`
+- **Date format**: ISO 8601 from `acquisition_start` field (e.g., `2023-05-15T00:00:00.000Z`)
 
 ### Imagery Age Colors
 
@@ -91,21 +115,30 @@ ageColors: {
 - 5-minute TTL (`_cacheTimeout: 5 * 60 * 1000`)
 - Cache keys: `projects-{limit}`, `project-{id}`
 
+### Dynamic TM Project Colors
+
+TM project boundaries and labels adapt to the basemap:
+- **Dark basemaps** (ESRI Imagery, Carto Dark): white outlines/labels with black halo
+- **Light basemaps** (OSM, ESRI Topo): dark grey (#333) outlines/labels with white halo
+- Updated via `updateTmProjectColors()`, called from `changeBasemap()`
+- Selected project uses solid + dashed contrast line for visibility on any background
+
 ## UI Layout
 
 **Left side:**
 - Header (osm-carbon-date)
-- Controls panel (project input, basemap, layers, recent projects list)
+- Controls panel (project input, basemap selector, imagery metadata source dropdown, TM projects toggle, recent projects list)
 
 **Right side (vertical stack):**
-- TM Project info panel (top)
+- TM Project info panel (top) — or OAM info panel (mutually exclusive)
 - Imagery Age legend (bottom: 220px)
-- Imagery Statistics panel (bottom: 40px)
+- Imagery Statistics panel (bottom: 40px) — shows stats for active source only
 - Attribution control (collapsed by default)
 
 **Center:**
-- Zoom warning (context-aware messages based on zoom level)
-- Imagery loading indicator (red pill)
+- Zoom warning (source-aware: "Zoom to 12+ for ESRI" or "Zoom to 8+ for OAM")
+- ESRI loading indicator (red pill)
+- OAM loading indicator (teal pill, shown during initial data load)
 
 **Note:** Map navigation controls (zoom +/-) are intentionally removed for cleaner UI.
 
@@ -119,24 +152,27 @@ map: {
     minZoomForImageryDisplay: 8,   // Show cached data down to this level
     recentProjectsLimit: 100
 }
+oam: {
+    minZoomForDisplay: 8,          // Show OAM footprints from z8
+    minZoomForThumbnails: 8,       // Show thumbnail overlays from z8
+    maxImageAreaDeg2: 1.0,         // Filter images > 1 deg²
+    maxThumbnails: 50              // Max concurrent thumbnail sources
+}
 ```
 
-### Two-Threshold Zoom System
+### Two-Threshold Zoom System (ESRI only)
 
-The app uses separate thresholds for **fetching** vs **displaying** imagery:
+The app uses separate thresholds for **fetching** vs **displaying** ESRI imagery:
 - **Fetch threshold (12)**: ESRI API's minimum zoom level for data
 - **Display threshold (8)**: Cached imagery footprints remain visible when zooming out
 
-This lets users see entire project areas with previously loaded footprints, even below ESRI's fetch limit. The `onMapMove()` function in `app.js` handles this with three cases:
-1. Below display (< 8): Clear all imagery
-2. Between display and fetch (8-11): Keep existing, don't fetch
-3. At/above fetch (12+): Fetch new imagery
+This lets users see entire project areas with previously loaded footprints, even below ESRI's fetch limit.
 
 ## Brand Colors
 
-- **HOT red**: `#d73f3f` (used for project markers, buttons, accents)
-- Project markers and labels use HOT red
-- TM project boundary: red/white dashed line
+- **HOT red**: `#d73f3f` (used for UI elements: header, buttons, sidebar)
+- **TM project outlines**: White on dark basemaps, dark grey on light basemaps (dynamic)
+- **OAM selection orange**: `#ff9800` (selected footprint highlight)
 
 ## Known Issues & Solutions
 
@@ -144,37 +180,9 @@ This lets users see entire project areas with previously loaded footprints, even
 2. **Imagery dates showing "Unknown"**: Fixed by using correct field names from identify endpoint
 3. **ESRI zoom limit**: Can't fetch below zoom 12 - solved with two-threshold system (display cached at z8+)
 4. **TM API CORS/pagination**: Solved by using insta-tm S3 mirror instead of direct TM API
-
-## Recent Changes (Feb 2026)
-
-### Imagery Metadata Improvements
-- **Reduced API requests**: Grid density reduced from 265 to 85 points at z12 to avoid overwhelming ESRI servers
-- **Label deduplication**: Imagery labels now use centroid points, preventing duplicate/overlapping labels from multipolygon tiles
-- **Smart caching**: Imagery data persists in memory while navigating at z8+; users zoom to z12+ to load an area, then can zoom out to z8 to view it
-- **No fetching at z8-11**: Only displays cached data at these zoom levels (prevents excessive API requests)
-- **Initial load fix**: Added `onMapMove()` call on map load to fetch imagery when page loads with hash coordinates
-
-### Zoom Display Enhancement
-- Added separate `minZoomForImageryFetch` (12) and `minZoomForImageryDisplay` (8) thresholds
-- Imagery footprints now persist when zooming out from 12 to 8
-- Context-aware zoom warning messages guide users
-
-### Layout Fixes
-- Removed map navigation controls (zoom +/-)
-- Attribution collapsed by default (was expanded)
-- Fixed legend/stats overlap (legend at bottom: 220px, stats at bottom: 40px)
-
-### TM Projects
-- **Label deduplication**: TM project labels use centroids from `all_projects.geojson` (933 projects), preventing duplicate labels from multipolygon geometries
-- Migrated to insta-tm S3 mirror for TM data (no more CORS proxy needed)
-- Single request fetches all projects, sorted by lastUpdated
-- Removed Cloudflare Worker dependency
-- Added PMTiles support for efficient rendering of project polygons at low zoom
-- Circle markers (centroids) + polygon outlines visible at global view
-- PMTiles polygons become clearly visible at zoom 6+
-
-### Known Limitations
-- **Small imagery slivers**: ESRI's identify endpoint doesn't support area filtering, so small sliver polygons between larger tiles are still fetched and displayed. Server-side filtering would require the query endpoint (CORS blocked) or a custom proxy.
+5. **OAM TMS CORS**: `tiles.openaerialmap.org` blocks cross-origin. TMS disabled. Thumbnails (S3) work. Future: titiler on Lambda.
+6. **OAM oversized images**: Country-spanning mosaics filtered by bbox area > 1 deg²
+7. **OAM PMTiles unfiltered**: PMTiles overview contains oversized images. Solved by not displaying it — only filtered GeoJSON at z8+.
 
 ## GitHub Actions
 
@@ -184,6 +192,8 @@ This lets users see entire project areas with previously loaded footprints, even
 ## Related Resources
 
 - insta-tm repo: https://github.com/cgiovando/insta-tm
+- OAM S3 mirror: `cgiovando-oam-api` S3 bucket
+- OpenAerialMap: https://openaerialmap.org
 - TM API docs: https://tasks.hotosm.org/api-docs
 - ESRI identify endpoint returns geometry with `rings` array
 - Original inspiration: https://github.com/martinedoesgis/esri-imagery-date-finder
