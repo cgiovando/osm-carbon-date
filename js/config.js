@@ -70,5 +70,24 @@ const CONFIG = {
     // ESRI API - using identify endpoint which returns geometry and works without CORS issues
     esri: {
         identifyUrl: 'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/identify'
+    },
+
+    // OpenAerialMap - static S3 mirror of OAM catalog
+    oam: {
+        s3Base: 'https://cgiovando-oam-api.s3.us-east-1.amazonaws.com',
+        // all_images.geojson: Full catalog (~20k footprints)
+        // images.pmtiles: Vector tiles for efficient rendering
+        minZoomForDisplay: 8,       // Show enriched footprints + labels from z8
+        minZoomForThumbnails: 8,    // Show thumbnail overlays from z8
+        maxImageAreaDeg2: 1.0,      // Filter out images with bbox > 1 deg² (~111x111km)
+        minZoomForAutoTms: 16,      // Auto-load TMS raster at z16+
+        maxThumbnails: 50,          // Max concurrent thumbnail image sources
+        maxAutoTms: 10,             // Max concurrent auto-loaded TMS sources
+        colors: {
+            fill: 'rgba(0, 188, 212, 0.15)',   // Cyan fill for PMTiles overview
+            stroke: '#00bcd4',                   // Cyan stroke
+            selectedStroke: '#ff9800',           // Orange for selected footprint
+            selectedFill: 'rgba(255, 152, 0, 0.2)'
+        }
     }
 };

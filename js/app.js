@@ -16,18 +16,29 @@
     let recentProjects = [];
     let projectCentroids = []; // For deduplicated TM project labels
 
+    // OAM state
+    let oamEnabled = false;
+    let oamLoaded = false;
+    let oamFeatures = [];       // All enriched OAM features (loaded once)
+    let oamCentroids = [];      // All OAM centroid points
+    let selectedOamFeature = null;
+
     // DOM elements
     const tmProjectInput = document.getElementById('tm-project-input');
     const loadProjectBtn = document.getElementById('load-project-btn');
     const basemapSelect = document.getElementById('basemap-select');
     const imagerySourceSelect = document.getElementById('imagery-source-select');
-    const showImageryMeta = document.getElementById('show-imagery-meta');
     const showTmProjects = document.getElementById('show-tm-projects');
     const zoomWarning = document.getElementById('zoom-warning');
     const infoPanel = document.getElementById('info-panel');
     const infoTitle = document.getElementById('info-title');
     const infoContent = document.getElementById('info-content');
     const closeInfoBtn = document.getElementById('close-info');
+    const oamInfoPanel = document.getElementById('oam-info-panel');
+    const oamInfoTitle = document.getElementById('oam-info-title');
+    const oamInfoContent = document.getElementById('oam-info-content');
+    const closeOamInfoBtn = document.getElementById('close-oam-info');
+    const oamLoading = document.getElementById('oam-loading');
     const statsPanel = document.getElementById('stats-panel');
     const statsContent = document.getElementById('stats-content');
     const recentProjectsList = document.getElementById('recent-projects-list');
@@ -197,6 +208,24 @@
             type: 'geojson',
             data: { type: 'FeatureCollection', features: [] }
         });
+
+        // OAM PMTiles source for efficient rendering at low zoom
+        map.addSource('oam-pmtiles', {
+            type: 'vector',
+            url: `pmtiles://${CONFIG.oam.s3Base}/images.pmtiles`
+        });
+
+        // OAM enriched footprints (GeoJSON, populated at z10+)
+        map.addSource('oam-footprints', {
+            type: 'geojson',
+            data: { type: 'FeatureCollection', features: [] }
+        });
+
+        // OAM centroid points for labels
+        map.addSource('oam-centroids', {
+            type: 'geojson',
+            data: { type: 'FeatureCollection', features: [] }
+        });
     }
 
     /**
@@ -211,8 +240,8 @@
             source: 'tm-projects-pmtiles',
             'source-layer': 'projects',
             paint: {
-                'fill-color': '#d73f3f',
-                'fill-opacity': 0.15
+                'fill-color': '#ffffff',
+                'fill-opacity': 0.1
             }
         });
 
@@ -223,9 +252,9 @@
             source: 'tm-projects-pmtiles',
             'source-layer': 'projects',
             paint: {
-                'line-color': '#d73f3f',
+                'line-color': '#ffffff',
                 'line-width': 1.5,
-                'line-opacity': 0.8
+                'line-opacity': 0.7
             }
         });
 
@@ -245,8 +274,8 @@
                 'text-optional': true
             },
             paint: {
-                'text-color': '#d73f3f',
-                'text-halo-color': '#ffffff',
+                'text-color': '#ffffff',
+                'text-halo-color': '#000000',
                 'text-halo-width': 2
             }
         });
@@ -301,8 +330,8 @@
             type: 'fill',
             source: 'tm-project',
             paint: {
-                'fill-color': '#d73f3f',
-                'fill-opacity': 0.15
+                'fill-color': '#ffffff',
+                'fill-opacity': 0.1
             }
         });
 
@@ -312,7 +341,7 @@
             type: 'line',
             source: 'tm-project',
             paint: {
-                'line-color': '#d73f3f',
+                'line-color': '#ffffff',
                 'line-width': 3
             }
         });
@@ -323,9 +352,99 @@
             type: 'line',
             source: 'tm-project',
             paint: {
-                'line-color': '#ffffff',
+                'line-color': '#333333',
                 'line-width': 3,
                 'line-dasharray': [2, 2]
+            }
+        });
+
+        // --- OAM layers (all start hidden) ---
+
+        // OAM PMTiles fill (cyan, for z0-9 overview)
+        map.addLayer({
+            id: 'oam-pmtiles-fill',
+            type: 'fill',
+            source: 'oam-pmtiles',
+            'source-layer': 'images',
+            paint: {
+                'fill-color': '#00bcd4',
+                'fill-opacity': 0.15
+            },
+            layout: { 'visibility': 'none' }
+        });
+
+        // OAM PMTiles outline
+        map.addLayer({
+            id: 'oam-pmtiles-outline',
+            type: 'line',
+            source: 'oam-pmtiles',
+            'source-layer': 'images',
+            paint: {
+                'line-color': '#00bcd4',
+                'line-width': 1,
+                'line-opacity': 0.6
+            },
+            layout: { 'visibility': 'none' }
+        });
+
+        // OAM footprints fill (age-colored, very light so thumbnails show through)
+        map.addLayer({
+            id: 'oam-footprints-fill',
+            type: 'fill',
+            source: 'oam-footprints',
+            paint: {
+                'fill-color': ['get', 'ageColor'],
+                'fill-opacity': 0.08
+            },
+            layout: { 'visibility': 'none' }
+        });
+
+        // OAM footprints outline (age-colored)
+        map.addLayer({
+            id: 'oam-footprints-outline',
+            type: 'line',
+            source: 'oam-footprints',
+            paint: {
+                'line-color': ['get', 'ageColor'],
+                'line-width': 2,
+                'line-opacity': 0.8
+            },
+            layout: { 'visibility': 'none' }
+        });
+
+        // OAM selected feature outline (orange)
+        map.addLayer({
+            id: 'oam-selected-outline',
+            type: 'line',
+            source: 'oam-footprints',
+            paint: {
+                'line-color': '#ff9800',
+                'line-width': 3,
+                'line-opacity': 1
+            },
+            filter: ['==', ['get', '_oamId'], ''],
+            layout: { 'visibility': 'none' }
+        });
+
+        // OAM date labels from centroids
+        map.addLayer({
+            id: 'oam-labels',
+            type: 'symbol',
+            source: 'oam-centroids',
+            layout: {
+                'text-field': ['get', 'formattedDate'],
+                'text-font': ['Open Sans Bold'],
+                'text-size': 12,
+                'text-anchor': 'center',
+                'text-allow-overlap': false,
+                'text-ignore-placement': false,
+                'text-padding': 5,
+                'visibility': 'none'
+            },
+            paint: {
+                'text-color': ['get', 'ageColor'],
+                'text-halo-color': '#000000',
+                'text-halo-width': 2
             }
         });
     }
@@ -343,13 +462,19 @@
         // Basemap selector
         basemapSelect.addEventListener('change', changeBasemap);
 
-        // Layer toggles
-        showImageryMeta.addEventListener('change', toggleImageryLayer);
+        // Imagery source selector (mutually exclusive ESRI / OAM)
+        imagerySourceSelect.addEventListener('change', changeImagerySource);
         showTmProjects.addEventListener('change', toggleTmLayer);
 
         // Close info panel
         closeInfoBtn.addEventListener('click', () => {
             infoPanel.classList.add('hidden');
+        });
+
+        // Close OAM info panel
+        closeOamInfoBtn.addEventListener('click', () => {
+            oamInfoPanel.classList.add('hidden');
+            OamSource.deselectFeature(map);
         });
 
         // Click on imagery for popup
@@ -359,6 +484,23 @@
         });
         map.on('mouseleave', 'imagery-fill', () => {
             map.getCanvas().style.cursor = '';
+        });
+
+        // Click on OAM footprints (enriched GeoJSON at z10+)
+        map.on('click', 'oam-footprints-fill', onOamFootprintClick);
+        map.on('mouseenter', 'oam-footprints-fill', () => {
+            map.getCanvas().style.cursor = 'pointer';
+        });
+        map.on('mouseleave', 'oam-footprints-fill', () => {
+            map.getCanvas().style.cursor = '';
+        });
+
+        // Handle failed image sources (404 thumbnails)
+        map.on('error', (e) => {
+            if (e.sourceId && e.sourceId.startsWith('oam-thumb-')) {
+                console.debug('Removing failed thumbnail:', e.sourceId);
+                OamSource._removeThumbnail(map, e.sourceId);
+            }
         });
 
         // Click on TM project
@@ -537,6 +679,9 @@
         loadProjectBtn.disabled = true;
         loadProjectBtn.innerHTML = '<span class="loading"></span>';
 
+        // Close OAM panel if open
+        oamInfoPanel.classList.add('hidden');
+
         // Show loading state in info panel immediately
         infoTitle.textContent = `TM Project #${projectId}`;
         infoContent.innerHTML = '<div class="loading-text">Loading project...</div>';
@@ -617,7 +762,7 @@
         const minDisplay = CONFIG.map.minZoomForImageryDisplay;
         const minFetch = CONFIG.map.minZoomForImageryFetch;
 
-        // Below display threshold: clear imagery
+        // Below ESRI display threshold: clear ESRI imagery
         if (zoom < minDisplay) {
             imageryLoading.classList.add('hidden');
             if (imageryFeatures.length > 0) {
@@ -635,7 +780,6 @@
                 });
                 statsPanel.classList.add('hidden');
             }
-            return;
         }
 
         const bounds = map.getBounds();
@@ -646,75 +790,70 @@
             bounds.getNorth()
         ];
 
-        const imagerySource = imagerySourceSelect.value;
-
-        if (imagerySource === 'esri') {
-            // Between display and fetch (z10-11): only display cached data, don't fetch
-            // This avoids overwhelming ESRI with hundreds of requests at low zoom
+        // ESRI imagery metadata (only when above display threshold)
+        if (imagerySourceSelect.value === 'esri' && zoom >= minDisplay) {
+            // Between display and fetch (z8-11): only display cached data, don't fetch
             if (zoom < minFetch) {
                 imageryLoading.classList.add('hidden');
-                return;
-            }
-
-            // Show loading indicator
-            imageryLoading.classList.remove('hidden');
-
-            try {
-                let data;
-
+            } else {
                 // At or above fetch threshold (z12+): fetch new imagery
-                data = await ImagerySource.fetchEsriMetadata(boundsArray, zoom);
+                imageryLoading.classList.remove('hidden');
 
-                if (data.error) {
-                    console.warn('Error loading imagery metadata:', data.message);
-                    return;
-                }
+                try {
+                    const data = await ImagerySource.fetchEsriMetadata(boundsArray, zoom);
 
-                if (data.features) {
-                    // Add new features that we haven't loaded yet
-                    const newFeatures = data.features.filter(f => {
-                        const id = f.properties.OBJECTID;
-                        if (loadedImageryIds.has(id)) return false;
-                        loadedImageryIds.add(id);
-                        return true;
-                    });
-
-                    if (newFeatures.length > 0) {
-                        imageryFeatures = [...imageryFeatures, ...newFeatures];
-                        map.getSource('imagery-metadata').setData({
-                            type: 'FeatureCollection',
-                            features: imageryFeatures
+                    if (data.error) {
+                        console.warn('Error loading imagery metadata:', data.message);
+                    } else if (data.features) {
+                        // Add new features that we haven't loaded yet
+                        const newFeatures = data.features.filter(f => {
+                            const id = f.properties.OBJECTID;
+                            if (loadedImageryIds.has(id)) return false;
+                            loadedImageryIds.add(id);
+                            return true;
                         });
 
-                        // Calculate centroids for new features (one label per tile)
-                        const newCentroids = newFeatures
-                            .map(f => {
-                                const centroid = getCentroidFromGeometry(f.geometry);
-                                if (!centroid) return null;
-                                return {
-                                    type: 'Feature',
-                                    geometry: {
-                                        type: 'Point',
-                                        coordinates: centroid
-                                    },
-                                    properties: { ...f.properties }
-                                };
-                            })
-                            .filter(f => f !== null);
+                        if (newFeatures.length > 0) {
+                            imageryFeatures = [...imageryFeatures, ...newFeatures];
+                            map.getSource('imagery-metadata').setData({
+                                type: 'FeatureCollection',
+                                features: imageryFeatures
+                            });
 
-                        imageryCentroids = [...imageryCentroids, ...newCentroids];
-                        map.getSource('imagery-centroids').setData({
-                            type: 'FeatureCollection',
-                            features: imageryCentroids
-                        });
+                            // Calculate centroids for new features (one label per tile)
+                            const newCentroids = newFeatures
+                                .map(f => {
+                                    const centroid = getCentroidFromGeometry(f.geometry);
+                                    if (!centroid) return null;
+                                    return {
+                                        type: 'Feature',
+                                        geometry: {
+                                            type: 'Point',
+                                            coordinates: centroid
+                                        },
+                                        properties: { ...f.properties }
+                                    };
+                                })
+                                .filter(f => f !== null);
 
-                        updateStats();
+                            imageryCentroids = [...imageryCentroids, ...newCentroids];
+                            map.getSource('imagery-centroids').setData({
+                                type: 'FeatureCollection',
+                                features: imageryCentroids
+                            });
+
+                            updateStats();
+                        }
                     }
+                } finally {
+                    imageryLoading.classList.add('hidden');
                 }
-            } finally {
-                // Hide loading indicator
-                imageryLoading.classList.add('hidden');
             }
+        }
+
+        // OAM imagery
+        if (oamEnabled) {
+            updateOamDisplay(boundsArray, zoom);
         }
     }
 
@@ -724,24 +863,32 @@
      */
     function updateZoomWarning() {
         const zoom = map.getZoom();
-        const minDisplay = CONFIG.map.minZoomForImageryDisplay;
-        const minFetch = CONFIG.map.minZoomForImageryFetch;
+        const source = imagerySourceSelect.value;
+        let message = '';
 
-        if (zoom >= minFetch) {
-            // At fetch level (12+) - can load new imagery, no warning needed
-            zoomWarning.classList.add('hidden');
-        } else if (zoom >= minDisplay) {
-            // Between display and fetch (8-11) - show cached data only
-            zoomWarning.classList.remove('hidden');
-            if (imageryFeatures.length > 0) {
-                zoomWarning.textContent = `Viewing cached imagery. Zoom to ${minFetch}+ to fetch new metadata.`;
+        if (source === 'esri') {
+            const minDisplay = CONFIG.map.minZoomForImageryDisplay;
+            const minFetch = CONFIG.map.minZoomForImageryFetch;
+
+            if (zoom >= minFetch) {
+                // At fetch level - no warning needed
+            } else if (zoom >= minDisplay && imageryFeatures.length > 0) {
+                message = `Viewing cached ESRI data. Zoom to ${minFetch}+ to fetch new.`;
             } else {
-                zoomWarning.textContent = `Zoom to ${minFetch}+ to fetch imagery metadata`;
+                message = `Zoom to ${minFetch}+ to fetch ESRI metadata`;
             }
-        } else {
-            // Below display level (<8) - imagery hidden
+        } else if (source === 'oam') {
+            const oamMinDisplay = CONFIG.oam.minZoomForDisplay;
+            if (zoom < oamMinDisplay) {
+                message = `Zoom to ${oamMinDisplay}+ to see OAM imagery`;
+            }
+        }
+
+        if (message) {
             zoomWarning.classList.remove('hidden');
-            zoomWarning.textContent = `Zoom to ${minFetch}+ to fetch imagery metadata`;
+            zoomWarning.textContent = message;
+        } else {
+            zoomWarning.classList.add('hidden');
         }
 
         // Also update project layer visibility
@@ -750,41 +897,72 @@
 
     /**
      * Update imagery statistics panel
+     * Shows stats for ESRI, OAM, or both depending on active layers
      */
     function updateStats() {
-        if (imageryFeatures.length === 0) {
-            statsPanel.classList.add('hidden');
-            return;
+        const source = imagerySourceSelect.value;
+        let html = '';
+
+        if (source === 'esri' && imageryFeatures.length > 0) {
+            const stats = ImagerySource.calculateStats(imageryFeatures);
+            if (stats) {
+                const avgClass = ImagerySource.getAgeClass(new Date(Date.now() - stats.avgAgeYears * 365.25 * 24 * 60 * 60 * 1000));
+                html = `
+                    <div class="stat-row">
+                        <span class="stat-label">Tiles loaded</span>
+                        <span class="stat-value">${stats.count}</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Newest</span>
+                        <span class="stat-value">${stats.newestFormatted}</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Oldest</span>
+                        <span class="stat-value">${stats.oldestFormatted}</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Average age</span>
+                        <span class="stat-value ${avgClass}">${stats.avgAgeFormatted}</span>
+                    </div>
+                `;
+            }
+        } else if (source === 'oam' && oamLoaded) {
+            const bounds = map.getBounds();
+            const boundsArray = [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()];
+            const visibleOam = OamSource.getFeaturesInBounds(boundsArray);
+
+            if (visibleOam.length > 0) {
+                const oamStats = OamSource.calculateStats(visibleOam);
+                if (oamStats) {
+                    const avgClass = ImagerySource.getAgeClass(new Date(Date.now() - oamStats.avgAgeYears * 365.25 * 24 * 60 * 60 * 1000));
+                    html = `
+                        <div class="stat-row">
+                            <span class="stat-label">Images in view</span>
+                            <span class="stat-value">${oamStats.count}</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-label">Newest</span>
+                            <span class="stat-value">${oamStats.newestFormatted}</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-label">Oldest</span>
+                            <span class="stat-value">${oamStats.oldestFormatted}</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-label">Average age</span>
+                            <span class="stat-value ${avgClass}">${oamStats.avgAgeFormatted}</span>
+                        </div>
+                    `;
+                }
+            }
         }
 
-        const stats = ImagerySource.calculateStats(imageryFeatures);
-        if (!stats) {
+        if (html) {
+            statsContent.innerHTML = html;
+            statsPanel.classList.remove('hidden');
+        } else {
             statsPanel.classList.add('hidden');
-            return;
         }
-
-        const avgClass = ImagerySource.getAgeClass(new Date(Date.now() - stats.avgAgeYears * 365.25 * 24 * 60 * 60 * 1000));
-
-        statsContent.innerHTML = `
-            <div class="stat-row">
-                <span class="stat-label">Tiles loaded</span>
-                <span class="stat-value">${stats.count}</span>
-            </div>
-            <div class="stat-row">
-                <span class="stat-label">Newest</span>
-                <span class="stat-value">${stats.newestFormatted}</span>
-            </div>
-            <div class="stat-row">
-                <span class="stat-label">Oldest</span>
-                <span class="stat-value">${stats.oldestFormatted}</span>
-            </div>
-            <div class="stat-row">
-                <span class="stat-label">Average age</span>
-                <span class="stat-value ${avgClass}">${stats.avgAgeFormatted}</span>
-            </div>
-        `;
-
-        statsPanel.classList.remove('hidden');
     }
 
     /**
@@ -800,16 +978,273 @@
         map.style.sourceCaches['basemap'].clearTiles();
         map.style.sourceCaches['basemap'].update(map.transform);
         map.triggerRepaint();
+
+        updateTmProjectColors();
     }
 
     /**
-     * Toggle imagery metadata layer
+     * Update TM project layer colors based on basemap brightness
+     * Light basemaps (OSM, ESRI Topo) → dark outlines/labels
+     * Dark basemaps (ESRI Imagery, Carto Dark) → white outlines/labels
      */
-    function toggleImageryLayer() {
-        const visibility = showImageryMeta.checked ? 'visible' : 'none';
-        map.setLayoutProperty('imagery-fill', 'visibility', visibility);
-        map.setLayoutProperty('imagery-outline', 'visibility', visibility);
-        map.setLayoutProperty('imagery-labels', 'visibility', visibility);
+    function updateTmProjectColors() {
+        const basemapId = basemapSelect.value;
+        const isDark = (basemapId === 'esri-imagery' || basemapId === 'carto-dark');
+
+        const primary = isDark ? '#ffffff' : '#333333';
+        const contrast = isDark ? '#333333' : '#ffffff';
+        const haloColor = isDark ? '#000000' : '#ffffff';
+
+        // PMTiles layers
+        map.setPaintProperty('pmtiles-projects-fill', 'fill-color', primary);
+        map.setPaintProperty('pmtiles-projects-outline', 'line-color', primary);
+
+        // Project labels
+        map.setPaintProperty('project-labels', 'text-color', primary);
+        map.setPaintProperty('project-labels', 'text-halo-color', haloColor);
+
+        // Selected TM project
+        map.setPaintProperty('tm-project-fill', 'fill-color', primary);
+        map.setPaintProperty('tm-project-outline', 'line-color', primary);
+        map.setPaintProperty('tm-project-outline-dash', 'line-color', contrast);
+    }
+
+    /**
+     * Change imagery metadata source (ESRI / OAM / None)
+     * Mutually exclusive — disables one before enabling the other
+     */
+    async function changeImagerySource() {
+        const source = imagerySourceSelect.value;
+
+        // --- Disable ESRI layers ---
+        if (source !== 'esri') {
+            map.setLayoutProperty('imagery-fill', 'visibility', 'none');
+            map.setLayoutProperty('imagery-outline', 'visibility', 'none');
+            map.setLayoutProperty('imagery-labels', 'visibility', 'none');
+        }
+
+        // --- Disable OAM layers ---
+        if (source !== 'oam') {
+            oamEnabled = false;
+            showOamLayers(false);
+            OamSource.cleanup(map);
+            oamInfoPanel.classList.add('hidden');
+            map.getSource('oam-footprints').setData({ type: 'FeatureCollection', features: [] });
+            map.getSource('oam-centroids').setData({ type: 'FeatureCollection', features: [] });
+        }
+
+        // --- Enable selected source ---
+        if (source === 'esri') {
+            map.setLayoutProperty('imagery-fill', 'visibility', 'visible');
+            map.setLayoutProperty('imagery-outline', 'visibility', 'visible');
+            map.setLayoutProperty('imagery-labels', 'visibility', 'visible');
+        } else if (source === 'oam') {
+            oamEnabled = true;
+
+            // Lazy-load OAM data on first selection
+            if (!oamLoaded) {
+                oamLoading.classList.remove('hidden');
+                try {
+                    const result = await OamSource.loadAllImages();
+                    oamFeatures = result.features;
+                    oamCentroids = result.centroids;
+                    oamLoaded = true;
+                    console.log(`OAM loaded: ${oamFeatures.length} features`);
+                } catch (e) {
+                    console.error('Failed to load OAM data:', e);
+                    oamLoading.classList.add('hidden');
+                    imagerySourceSelect.value = 'none';
+                    oamEnabled = false;
+                    return;
+                } finally {
+                    oamLoading.classList.add('hidden');
+                }
+            }
+
+            showOamLayers(true);
+
+            // Update display for current viewport
+            const bounds = map.getBounds();
+            const boundsArray = [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()];
+            updateOamDisplay(boundsArray, map.getZoom());
+        }
+
+        updateZoomWarning();
+        updateStats();
+    }
+
+    /**
+     * Show/hide all OAM map layers
+     */
+    function showOamLayers(visible) {
+        const v = visible ? 'visible' : 'none';
+        map.setLayoutProperty('oam-footprints-fill', 'visibility', v);
+        map.setLayoutProperty('oam-footprints-outline', 'visibility', v);
+        map.setLayoutProperty('oam-selected-outline', 'visibility', v);
+        map.setLayoutProperty('oam-labels', 'visibility', v);
+    }
+
+    /**
+     * Update OAM display for current viewport
+     * Filters all OAM features to viewport, updates sources, manages thumbnails/TMS
+     */
+    function updateOamDisplay(boundsArray, zoom) {
+        const oamMinDisplay = CONFIG.oam.minZoomForDisplay;
+
+        if (zoom < oamMinDisplay) {
+            // Below OAM display threshold — hide all enriched layers
+            map.setLayoutProperty('oam-footprints-fill', 'visibility', 'none');
+            map.setLayoutProperty('oam-footprints-outline', 'visibility', 'none');
+            map.setLayoutProperty('oam-selected-outline', 'visibility', 'none');
+            map.setLayoutProperty('oam-labels', 'visibility', 'none');
+
+            // Clear enriched data and thumbnails
+            map.getSource('oam-footprints').setData({ type: 'FeatureCollection', features: [] });
+            map.getSource('oam-centroids').setData({ type: 'FeatureCollection', features: [] });
+            OamSource.clearAllThumbnails(map);
+            return;
+        }
+
+        // At z8+: show enriched footprints
+        map.setLayoutProperty('oam-footprints-fill', 'visibility', 'visible');
+        map.setLayoutProperty('oam-footprints-outline', 'visibility', 'visible');
+        map.setLayoutProperty('oam-selected-outline', 'visibility', 'visible');
+        map.setLayoutProperty('oam-labels', 'visibility', 'visible');
+
+        // Filter features to viewport
+        const visibleFeatures = OamSource.getFeaturesInBounds(boundsArray);
+        const visibleCentroids = OamSource.getCentroidsInBounds(boundsArray);
+
+        // Update GeoJSON sources
+        map.getSource('oam-footprints').setData({
+            type: 'FeatureCollection',
+            features: visibleFeatures
+        });
+        map.getSource('oam-centroids').setData({
+            type: 'FeatureCollection',
+            features: visibleCentroids
+        });
+
+        // Manage thumbnails
+        if (zoom >= CONFIG.oam.minZoomForThumbnails) {
+            OamSource.addThumbnailsForFeatures(map, visibleFeatures);
+        } else {
+            OamSource.clearAllThumbnails(map);
+        }
+
+        // Update stats with combined data if both layers are on
+        updateStats();
+    }
+
+    /**
+     * Handle click on OAM enriched footprint (z10+)
+     */
+    function onOamFootprintClick(e) {
+        if (!e.features || e.features.length === 0) return;
+
+        const mapFeature = e.features[0];
+        const oamId = mapFeature.properties._oamId;
+
+        // Find the full enriched feature from our data
+        const feature = oamFeatures.find(f => f.properties._oamId === oamId);
+        if (!feature) return;
+
+        // Select and load TMS
+        selectedOamFeature = feature;
+        OamSource.selectFeature(map, feature);
+
+        // Close TM info panel if open
+        infoPanel.classList.add('hidden');
+
+        // Show OAM info panel
+        oamInfoTitle.textContent = 'OAM Image';
+        oamInfoContent.innerHTML = formatOamInfo(feature);
+        oamInfoPanel.classList.remove('hidden');
+    }
+
+    /**
+     * Handle click on OAM PMTiles (low zoom overview)
+     */
+    function onOamPmtilesClick(e) {
+        // At low zoom, zoom in to see details
+        const zoom = map.getZoom();
+        if (zoom < CONFIG.oam.minZoomForDisplay) {
+            map.flyTo({
+                center: e.lngLat,
+                zoom: CONFIG.oam.minZoomForDisplay
+            });
+        }
+    }
+
+    /**
+     * Format OAM feature info for the info panel
+     */
+    function formatOamInfo(feature) {
+        const p = feature.properties;
+        let html = '';
+
+        // Thumbnail preview
+        if (p.thumbnail) {
+            html += `<img src="${p.thumbnail}" class="oam-thumbnail-preview" alt="OAM thumbnail" onerror="this.style.display='none'">`;
+        }
+
+        html += `
+            <div class="info-row">
+                <span class="info-label">Date</span>
+                <span class="info-value">${p.formattedDate}</span>
+            </div>
+        `;
+
+        if (p.provider) {
+            html += `
+                <div class="info-row">
+                    <span class="info-label">Provider</span>
+                    <span class="info-value">${p.provider}</span>
+                </div>
+            `;
+        }
+
+        if (p.platform) {
+            html += `
+                <div class="info-row">
+                    <span class="info-label">Platform</span>
+                    <span class="info-value">${p.platform}</span>
+                </div>
+            `;
+        }
+
+        if (p.sensor) {
+            html += `
+                <div class="info-row">
+                    <span class="info-label">Sensor</span>
+                    <span class="info-value">${p.sensor}</span>
+                </div>
+            `;
+        }
+
+        if (p.gsd) {
+            html += `
+                <div class="info-row">
+                    <span class="info-label">GSD</span>
+                    <span class="info-value">${Number(p.gsd).toFixed(2)} m</span>
+                </div>
+            `;
+        }
+
+        if (p.title) {
+            html += `
+                <div class="info-row">
+                    <span class="info-label">Title</span>
+                    <span class="info-value">${p.title}</span>
+                </div>
+            `;
+        }
+
+        if (p.pageUrl) {
+            html += `<a href="${p.pageUrl}" target="_blank" class="btn-link">View on OpenAerialMap</a>`;
+        }
+
+        return html;
     }
 
     /**
