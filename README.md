@@ -68,7 +68,7 @@ When creating map data in OpenStreetMap through Tasking Manager projects, we oft
 ## Tech Stack
 
 - [MapLibre GL JS](https://maplibre.org/) — Map rendering
-- [insta-tm](https://github.com/cgiovando/insta-tm) — S3-hosted TM API mirror (synced every 10 min)
+- [insta-tm](https://github.com/cgiovando/insta-tm) — Cloud-native TM API mirror on Cloudflare R2 (synced daily)
 - [PMTiles](https://protomaps.com/docs/pmtiles) — Efficient vector tiles for TM project polygons
 - [ESRI ArcGIS REST API](https://developers.arcgis.com/rest/) — Imagery metadata via identify endpoint
 - [OpenAerialMap](https://openaerialmap.org/) — Open drone/aerial imagery catalog
@@ -78,7 +78,7 @@ When creating map data in OpenStreetMap through Tasking Manager projects, we oft
 
 ### TM Project Data
 
-The app uses **insta-tm**, an S3-hosted mirror of Tasking Manager data that syncs every 10 minutes via GitHub Actions. This avoids CORS issues and provides fast, reliable access to:
+The app uses **insta-tm**, a cloud-native mirror of Tasking Manager data hosted on Cloudflare R2 and synced daily via GitHub Actions. This avoids CORS issues and provides fast, reliable access to:
 
 - All TM projects as a single GeoJSON file (sorted client-side by lastUpdated)
 - Individual project details at `/api/v2/projects/{id}`
