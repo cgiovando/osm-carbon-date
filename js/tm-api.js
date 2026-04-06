@@ -133,8 +133,8 @@ const TmApi = {
      * Process project data into a standardized format
      */
     processProject(data) {
-        // Total tasks is the number of features in the tasks GeoJSON
-        const totalTasks = data.tasks?.features?.length || 0;
+        // Prefer pre-computed totalTasks (lean format), fall back to counting task features
+        const totalTasks = data.totalTasks ?? data.tasks?.features?.length ?? 0;
 
         return {
             id: data.projectId,

@@ -59,9 +59,9 @@ const CONFIG = {
     // Insta-TM: Cloud-native mirror of HOT Tasking Manager API
     // https://github.com/cgiovando/insta-tm
     tmApi: {
-        // S3-hosted API endpoints (no CORS proxy needed)
+        // R2-hosted API endpoints (Cloudflare CDN, no CORS proxy needed)
         projectUrl: 'https://tasks.hotosm.org/projects',
-        s3Base: 'https://insta-tm.s3.us-east-1.amazonaws.com',
+        s3Base: 'https://pub-9f93f222eb8648a08829b4d1cd8edcfb.r2.dev',
         // Individual project: {s3Base}/api/v2/projects/{id}
         // All projects GeoJSON: {s3Base}/all_projects.geojson
         // PMTiles: {s3Base}/projects.pmtiles
