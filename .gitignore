@@ -15,3 +15,8 @@ node_modules/
 # Local development
 .env
 .env.local
+
+.timesheet-log.md
+CLAUDE.md
+PROJECT_NOTES.md
+AGENTS.md
