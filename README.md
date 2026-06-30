@@ -25,11 +25,12 @@ When creating map data in OpenStreetMap through Tasking Manager projects, we oft
 ## Features
 
 - **Dual imagery sources**: Switch between ESRI World Imagery metadata and OpenAerialMap footprints
-- **OAM thumbnail overlays**: See actual aerial imagery thumbnails from OpenAerialMap
-- **TM project overlay**: Load any Tasking Manager project boundary
+- **Hover for ESRI dates**: Hover the map to read each imagery tile's date, source, and resolution
+- **OAM footprints**: Age-colored OpenAerialMap outlines with date labels; click one for provider, platform, sensor, and GSD
+- **TM project overlay**: All projects shown as points at low zoom, switching to boundaries when you zoom in (z10+)
 - **Color-coded age**: Instantly see imagery freshness (green = recent, red = old)
-- **Click for details**: Get imagery dates, resolution, provider, sensor, and GSD
-- **Recent projects list**: Browse and load recent TM projects (100 most recent)
+- **Smart selection**: Clicking resolves to the smallest feature under the cursor, so projects/footprints overlapping a larger one stay reachable
+- **Recent projects list**: Browse and load the 100 most recently updated TM projects
 - **Basemap switcher**: Compare different basemap providers, with adaptive project boundary colors
 - **Age statistics**: View newest/oldest imagery dates for visible area
 - **URL deep-linking**: Share links to specific TM projects (e.g., `?project=17232`)
@@ -39,14 +40,16 @@ When creating map data in OpenStreetMap through Tasking Manager projects, we oft
 
 ### ESRI World Imagery
 - Metadata fetched at zoom 12+ via the ESRI identify API
-- Shows tile boundaries with capture dates, resolution, and source info
+- Shows tile boundaries with capture dates, color-coded by age
+- Hover any tile for its date, source, and resolution
 - Cached data stays visible down to zoom 8
 
 ### OpenAerialMap
 - ~20,000 drone/aerial imagery footprints loaded from an S3 mirror
-- Visible from zoom 8+ with thumbnail overlays and date labels
-- Click footprints to see provider, platform, sensor, and GSD
+- Visible from zoom 8+ as age-colored outlines with date labels
+- Click a footprint for provider, platform, sensor, and GSD (with a thumbnail preview in the info panel)
 - Oversized mosaics (>1 deg²) are filtered out automatically
+- Full-resolution imagery overlays are off by default to keep panning fast
 
 ## Imagery Age Legend
 
@@ -60,10 +63,11 @@ When creating map data in OpenStreetMap through Tasking Manager projects, we oft
 ## Usage
 
 1. Visit the app at **https://cgiovando.github.io/osm-carbon-date/**
-2. Enter a Tasking Manager project ID or click a project from the list
+2. Enter a Tasking Manager project ID, click a project on the map, or pick one from the list
 3. Select an imagery metadata source (ESRI or OpenAerialMap)
 4. Zoom in to see imagery metadata (zoom 12+ for ESRI, zoom 8+ for OAM)
-5. Click on imagery tiles/footprints to see capture dates and details
+5. In ESRI mode, hover the map to read imagery dates; in OAM mode, click a footprint for its details
+6. Clicking selects the smallest project/footprint under the cursor; close the project panel (X) to deselect and pick another
 
 ## Tech Stack
 
@@ -80,9 +84,9 @@ When creating map data in OpenStreetMap through Tasking Manager projects, we oft
 
 The app uses **insta-tm**, a cloud-native mirror of Tasking Manager data hosted on Cloudflare R2 and synced daily via GitHub Actions. This avoids CORS issues and provides fast, reliable access to:
 
-- All TM projects as a single GeoJSON file (sorted client-side by lastUpdated)
+- A lightweight `projects_summary.json` (~5 MB) with one lean record per project — id, name, status, centroid, area, and `lastUpdated` — used for the sidebar list (sorted by `lastUpdated`) and the project label/point centroids. This replaced a ~570 MB all-projects GeoJSON, cutting startup from ~30s to ~2s.
 - Individual project details at `/api/v2/projects/{id}`
-- PMTiles vector tiles for efficient polygon rendering at low zoom levels
+- PMTiles vector tiles for efficient polygon rendering
 
 ### ESRI Imagery Metadata
 
@@ -99,7 +103,7 @@ OAM data comes from a static S3 mirror of the OAM catalog (`cgiovando-oam-api`):
 
 - ~20k image footprints loaded as GeoJSON on first selection (lazy-loaded)
 - Client-side viewport filtering for efficient rendering
-- Thumbnail overlays as MapLibre image sources (max 50 concurrent)
+- Footprints shown as age-colored outlines; full-resolution thumbnail overlays are disabled by default (toggleable in config) to keep panning fast
 - Oversized images (country-spanning mosaics) filtered by bbox area
 
 ### Adaptive UI
