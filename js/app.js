@@ -778,32 +778,24 @@
     }
 
     /**
-     * Update visibility of project layers based on zoom and selection
-     * - PMTiles: Show for efficient rendering of all projects
-     * - Selected project: Show highlighted boundary when a specific project is loaded
+     * Update visibility of project browse layers.
+     *
+     * The browse polygons/points/labels stay visible even when a project is
+     * selected: hiding them (the old behaviour at z10+) made smaller projects
+     * overlapping a large selected one impossible to click. The selected
+     * project still stands out via its own highlighted boundary (tm-project-*),
+     * and the layers' min/maxzoom handle the points<->polygons handoff.
      */
     function updateProjectLayerVisibility() {
-        const zoom = map.getZoom();
-        const hasSelectedProject = currentProject !== null;
-
         if (!showTmProjects.checked) {
-            // All TM layers hidden
+            // Toggle owns the hidden state
             return;
         }
 
-        // At zoom 10+ with a selected project, hide PMTiles and show only the selected project boundary
-        if (zoom >= 10 && hasSelectedProject) {
-            map.setLayoutProperty('project-points', 'visibility', 'none');
-            map.setLayoutProperty('pmtiles-projects-fill', 'visibility', 'none');
-            map.setLayoutProperty('pmtiles-projects-outline', 'visibility', 'none');
-            map.setLayoutProperty('project-labels', 'visibility', 'none');
-        } else {
-            // Show points (low zoom), PMTiles polygons + labels (projectPolygonZoom+)
-            map.setLayoutProperty('project-points', 'visibility', 'visible');
-            map.setLayoutProperty('pmtiles-projects-fill', 'visibility', 'visible');
-            map.setLayoutProperty('pmtiles-projects-outline', 'visibility', 'visible');
-            map.setLayoutProperty('project-labels', 'visibility', 'visible');
-        }
+        map.setLayoutProperty('project-points', 'visibility', 'visible');
+        map.setLayoutProperty('pmtiles-projects-fill', 'visibility', 'visible');
+        map.setLayoutProperty('pmtiles-projects-outline', 'visibility', 'visible');
+        map.setLayoutProperty('project-labels', 'visibility', 'visible');
     }
 
     /**
