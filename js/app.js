@@ -513,8 +513,10 @@
             map.getCanvas().style.cursor = '';
         });
 
-        // Click on OAM footprints (enriched GeoJSON at z10+)
-        map.on('click', 'oam-footprints-fill', onOamFootprintClick);
+        // OAM click handling is unified in onMapClickWhenOam (registered below),
+        // so a click on a footprint, on the background, or on a TM polygon in a
+        // gap between footprints all behave predictably.
+        map.on('click', onMapClickWhenOam);
         map.on('mouseenter', 'oam-footprints-fill', () => {
             map.getCanvas().style.cursor = 'pointer';
         });
@@ -669,6 +671,8 @@
      * Handle click on PMTiles project polygon
      */
     function onPmtilesProjectClick(e) {
+        // In OAM mode, clicks are dispatched by onMapClickWhenOam to avoid double-handling.
+        if (oamEnabled) return;
         if (!e.features || e.features.length === 0) return;
 
         const feature = e.features[0];
@@ -1145,8 +1149,8 @@
             features: visibleCentroids
         });
 
-        // Manage thumbnails
-        if (zoom >= CONFIG.oam.minZoomForThumbnails) {
+        // Manage thumbnails (disabled by default — outlines/bboxes only, overlays were too heavy)
+        if (CONFIG.oam.showThumbnails && zoom >= CONFIG.oam.minZoomForThumbnails) {
             OamSource.addThumbnailsForFeatures(map, visibleFeatures);
         } else {
             OamSource.clearAllThumbnails(map);
@@ -1157,19 +1161,51 @@
     }
 
     /**
-     * Handle click on OAM enriched footprint (z10+)
+     * Unified click dispatch while OAM is the active imagery source.
+     * Priority: OAM footprint under the cursor → select it; otherwise clear any
+     * OAM selection and fall through to a TM project polygon in the gap. This
+     * keeps both layers usable and always lets the user "get out" of a selection.
      */
-    function onOamFootprintClick(e) {
-        if (!e.features || e.features.length === 0) return;
+    function onMapClickWhenOam(e) {
+        if (!oamEnabled) return; // ESRI/none mode handled by the layer-scoped handlers
 
-        const mapFeature = e.features[0];
+        // 1. OAM footprint under the cursor wins (inspect imagery date)
+        const oamHits = map.queryRenderedFeatures(e.point, { layers: ['oam-footprints-fill'] });
+        if (oamHits.length > 0) {
+            selectOamFootprint(oamHits[0]);
+            return;
+        }
+
+        // 2. Clicked off any footprint → clear OAM selection + panel
+        if (selectedOamFeature) {
+            OamSource.deselectFeature(map);
+            selectedOamFeature = null;
+            oamInfoPanel.classList.add('hidden');
+        }
+
+        // 3. Fall through to a TM project polygon under the click, if any
+        const tmLayers = ['pmtiles-projects-fill', 'tm-project-fill'].filter(l => map.getLayer(l));
+        const tmHits = tmLayers.length ? map.queryRenderedFeatures(e.point, { layers: tmLayers }) : [];
+        if (tmHits.length > 0) {
+            const props = tmHits[0].properties;
+            const projectId = props.projectId || props.id;
+            if (projectId) {
+                tmProjectInput.value = projectId;
+                loadTmProject();
+            }
+        }
+    }
+
+    /**
+     * Select an OAM footprint (highlight + info panel) from a rendered feature.
+     */
+    function selectOamFootprint(mapFeature) {
         const oamId = mapFeature.properties._oamId;
 
         // Find the full enriched feature from our data
         const feature = oamFeatures.find(f => f.properties._oamId === oamId);
         if (!feature) return;
 
-        // Select and load TMS
         selectedOamFeature = feature;
         OamSource.selectFeature(map, feature);
 
@@ -1324,6 +1360,8 @@
      * Handle click on TM project
      */
     function onTmProjectClick(e) {
+        // In OAM mode, clicks are dispatched by onMapClickWhenOam to avoid double-handling.
+        if (oamEnabled) return;
         if (!currentProject) return;
 
         // Show info panel

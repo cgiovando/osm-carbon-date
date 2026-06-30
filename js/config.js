@@ -9,7 +9,7 @@ const CONFIG = {
         zoom: 2,
         minZoomForImageryFetch: 12, // Minimum zoom to fetch new imagery metadata (ESRI limit)
         minZoomForImageryDisplay: 8, // Minimum zoom to display cached imagery metadata
-        projectPolygonZoom: 8, // Handoff: points below this zoom, project polygons + labels at/above
+        projectPolygonZoom: 10, // Handoff: points below this zoom, project polygons + labels at/above
         recentProjectsLimit: 100 // Number of recent TM projects to load
     },
 
@@ -79,7 +79,8 @@ const CONFIG = {
         // all_images.geojson: Full catalog (~20k footprints)
         // images.pmtiles: Vector tiles for efficient rendering
         minZoomForDisplay: 8,       // Show enriched footprints + labels from z8
-        minZoomForThumbnails: 8,    // Show thumbnail overlays from z8
+        showThumbnails: false,      // Map thumbnail overlays disabled — outlines/bboxes only (overlays were too heavy)
+        minZoomForThumbnails: 8,    // Show thumbnail overlays from z8 (only when showThumbnails is true)
         maxImageAreaDeg2: 1.0,      // Filter out images with bbox > 1 deg² (~111x111km)
         minZoomForAutoTms: 16,      // Auto-load TMS raster at z16+
         maxThumbnails: 50,          // Max concurrent thumbnail image sources
