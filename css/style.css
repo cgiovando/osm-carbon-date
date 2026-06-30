@@ -396,6 +396,25 @@ button:disabled {
     padding: 4px 8px;
 }
 
+/* ESRI imagery hover tooltip (follows the cursor) */
+.imagery-tooltip {
+    position: absolute;
+    z-index: 5;
+    pointer-events: none;
+    background: rgba(0, 0, 0, 0.8);
+    color: #fff;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
+.imagery-tooltip.hidden {
+    display: none;
+}
+
 /* Recent Projects List */
 .recent-projects-list {
     max-height: 300px;

@@ -515,6 +515,11 @@
             map.on('mouseleave', layerId, () => { map.getCanvas().style.cursor = ''; });
         }
 
+        // ESRI imagery hover tooltip. Clicking selects the TM project under the
+        // cursor, so the imagery date/source is surfaced on hover instead — this
+        // stays reachable even where a project covers the imagery.
+        setupImageryHoverTooltip();
+
         // Handle failed image sources (404 thumbnails)
         map.on('error', (e) => {
             if (e.sourceId && e.sourceId.startsWith('oam-thumb-')) {
@@ -1378,6 +1383,42 @@
             .setLngLat(e.lngLat)
             .setHTML(html)
             .addTo(map);
+    }
+
+    /**
+     * Show a cursor-following tooltip with the ESRI imagery tile's date / source
+     * / resolution on hover. Active only in ESRI mode (OAM has its own click
+     * panel). Hover keeps imagery info reachable even where a TM project — which
+     * owns the click — covers the same spot.
+     */
+    function setupImageryHoverTooltip() {
+        const tooltip = document.createElement('div');
+        tooltip.className = 'imagery-tooltip hidden';
+        map.getContainer().appendChild(tooltip);
+
+        map.on('mousemove', (e) => {
+            if (oamEnabled || !map.getLayer('imagery-fill')) {
+                tooltip.classList.add('hidden');
+                return;
+            }
+            const hits = map.queryRenderedFeatures(e.point, { layers: ['imagery-fill'] });
+            if (!hits.length) {
+                tooltip.classList.add('hidden');
+                return;
+            }
+            const p = hits[0].properties;
+            const parts = [];
+            if (p.formattedDate) parts.push(p.formattedDate);
+            const src = p.NICE_NAME || p.source;
+            if (src) parts.push(src);
+            if (p.SRC_RES) parts.push(`${p.SRC_RES} m`);
+            tooltip.textContent = parts.join('  ·  ');
+            tooltip.style.left = `${e.point.x + 14}px`;
+            tooltip.style.top = `${e.point.y + 14}px`;
+            tooltip.classList.remove('hidden');
+        });
+
+        map.on('mouseout', () => tooltip.classList.add('hidden'));
     }
 
     // Initialize
