@@ -15,6 +15,7 @@
     let imageryCentroids = []; // For deduplicated imagery labels
     let recentProjects = [];
     let projectCentroids = []; // For deduplicated TM project labels
+    let projectAreaById = new Map(); // projectId -> areaSqKm (for smallest-feature click resolution)
 
     // OAM state
     let oamEnabled = false;
@@ -600,6 +601,15 @@
         try {
             const items = await TmApi.fetchProjectsSummary();
 
+            // Build projectId -> area lookup, used to resolve overlapping clicks
+            // to the smallest (most specific) feature.
+            projectAreaById = new Map();
+            for (const p of items) {
+                if (p.id != null && typeof p.areaSqKm === 'number') {
+                    projectAreaById.set(Number(p.id), p.areaSqKm);
+                }
+            }
+
             projectCentroids = items
                 .filter(p => Array.isArray(p.centroid) && p.centroid.length === 2)
                 .map(p => ({
@@ -1161,49 +1171,89 @@
     }
 
     /**
+     * Approximate area of a [w,s,e,n] bbox in km², used to rank overlapping
+     * features so the smallest (most specific) one wins a click.
+     */
+    function bboxAreaKm2(bbox) {
+        if (!bbox) return Infinity;
+        const midLat = ((bbox[1] + bbox[3]) / 2) * Math.PI / 180;
+        const dLatKm = (bbox[3] - bbox[1]) * 110.574;
+        const dLonKm = (bbox[2] - bbox[0]) * 111.320 * Math.cos(midLat);
+        return Math.abs(dLatKm * dLonKm);
+    }
+
+    /**
      * Unified click dispatch while OAM is the active imagery source.
-     * Priority: OAM footprint under the cursor → select it; otherwise clear any
-     * OAM selection and fall through to a TM project polygon in the gap. This
-     * keeps both layers usable and always lets the user "get out" of a selection.
+     *
+     * Dense areas stack a large mosaic, several smaller OAM footprints, and TM
+     * project polygons on the same spot. Picking the first hit always lands on
+     * the biggest one, so the others (and the projects underneath) are
+     * unreachable. Instead we collect every OAM footprint and TM project under
+     * the cursor and select the SMALLEST by area — the most specific thing the
+     * user is pointing at. Clicking empty space clears the selection.
      */
     function onMapClickWhenOam(e) {
         if (!oamEnabled) return; // ESRI/none mode handled by the layer-scoped handlers
 
-        // 1. OAM footprint under the cursor wins (inspect imagery date)
+        const candidates = [];
+
+        // OAM footprints (true area from each footprint's bbox)
         const oamHits = map.queryRenderedFeatures(e.point, { layers: ['oam-footprints-fill'] });
-        if (oamHits.length > 0) {
-            selectOamFootprint(oamHits[0]);
+        const seenOam = new Set();
+        for (const h of oamHits) {
+            const id = h.properties._oamId;
+            if (seenOam.has(id)) continue;
+            seenOam.add(id);
+            const feature = oamFeatures.find(f => f.properties._oamId === id);
+            if (feature) {
+                candidates.push({ type: 'oam', feature, areaKm2: bboxAreaKm2(feature.properties.bbox) });
+            }
+        }
+
+        // TM project polygons (area from the summary lookup)
+        const tmLayers = ['pmtiles-projects-fill', 'tm-project-fill'].filter(l => map.getLayer(l));
+        const tmHits = tmLayers.length ? map.queryRenderedFeatures(e.point, { layers: tmLayers }) : [];
+        const seenTm = new Set();
+        for (const h of tmHits) {
+            const projectId = h.properties.projectId || h.properties.id;
+            if (projectId == null || seenTm.has(projectId)) continue;
+            seenTm.add(projectId);
+            const areaKm2 = projectAreaById.get(Number(projectId));
+            candidates.push({ type: 'tm', projectId, areaKm2: areaKm2 != null ? areaKm2 : Infinity });
+        }
+
+        // Nothing under the cursor → clear any OAM selection ("get out")
+        if (candidates.length === 0) {
+            if (selectedOamFeature) {
+                OamSource.deselectFeature(map);
+                selectedOamFeature = null;
+                oamInfoPanel.classList.add('hidden');
+            }
             return;
         }
 
-        // 2. Clicked off any footprint → clear OAM selection + panel
-        if (selectedOamFeature) {
-            OamSource.deselectFeature(map);
-            selectedOamFeature = null;
-            oamInfoPanel.classList.add('hidden');
-        }
+        // Smallest (most specific) feature wins
+        candidates.sort((a, b) => a.areaKm2 - b.areaKm2);
+        const pick = candidates[0];
 
-        // 3. Fall through to a TM project polygon under the click, if any
-        const tmLayers = ['pmtiles-projects-fill', 'tm-project-fill'].filter(l => map.getLayer(l));
-        const tmHits = tmLayers.length ? map.queryRenderedFeatures(e.point, { layers: tmLayers }) : [];
-        if (tmHits.length > 0) {
-            const props = tmHits[0].properties;
-            const projectId = props.projectId || props.id;
-            if (projectId) {
-                tmProjectInput.value = projectId;
-                loadTmProject();
+        if (pick.type === 'oam') {
+            selectOamFootprint(pick.feature);
+        } else {
+            // Selecting a project: clear any OAM selection, then load it
+            if (selectedOamFeature) {
+                OamSource.deselectFeature(map);
+                selectedOamFeature = null;
+                oamInfoPanel.classList.add('hidden');
             }
+            tmProjectInput.value = pick.projectId;
+            loadTmProject();
         }
     }
 
     /**
-     * Select an OAM footprint (highlight + info panel) from a rendered feature.
+     * Select an OAM footprint (highlight + info panel) from an enriched feature.
      */
-    function selectOamFootprint(mapFeature) {
-        const oamId = mapFeature.properties._oamId;
-
-        // Find the full enriched feature from our data
-        const feature = oamFeatures.find(f => f.properties._oamId === oamId);
+    function selectOamFootprint(feature) {
         if (!feature) return;
 
         selectedOamFeature = feature;
