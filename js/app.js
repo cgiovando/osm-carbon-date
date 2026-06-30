@@ -232,18 +232,23 @@
      * Add map layers
      */
     function addMapLayers() {
+        // Handoff zoom: points below it, project polygons + labels at/above.
+        // Fallback guards against a stale cached config.js (an undefined stop
+        // would otherwise produce an invalid interpolate expression).
+        const polyZoom = CONFIG.map.projectPolygonZoom || 8;
+
         // Project points (circles) for the low-zoom global overview.
-        // Lightweight alternative to polygons; hidden at z6+ where polygons take over.
+        // Lightweight alternative to polygons; hidden at polyZoom+ where polygons take over.
         map.addLayer({
             id: 'project-points',
             type: 'circle',
             source: 'project-centroids',
-            maxzoom: 6,
+            maxzoom: polyZoom,
             paint: {
                 'circle-radius': [
                     'interpolate', ['linear'], ['zoom'],
                     2, 2.5,
-                    6, 5
+                    polyZoom, 5
                 ],
                 'circle-color': '#d73f3f',
                 'circle-opacity': 0.85,
@@ -252,14 +257,14 @@
             }
         });
 
-        // PMTiles layers - project polygons (shown from z6+; points cover z0-6)
+        // PMTiles layers - project polygons (shown from polyZoom+; points cover below)
         // Fill layer for project areas
         map.addLayer({
             id: 'pmtiles-projects-fill',
             type: 'fill',
             source: 'tm-projects-pmtiles',
             'source-layer': 'projects',
-            minzoom: 6,
+            minzoom: polyZoom,
             paint: {
                 'fill-color': '#ffffff',
                 'fill-opacity': 0.1
@@ -272,7 +277,7 @@
             type: 'line',
             source: 'tm-projects-pmtiles',
             'source-layer': 'projects',
-            minzoom: 6,
+            minzoom: polyZoom,
             paint: {
                 'line-color': '#ffffff',
                 'line-width': 1.5,
@@ -285,7 +290,7 @@
             id: 'project-labels',
             type: 'symbol',
             source: 'project-centroids',
-            minzoom: 6,
+            minzoom: polyZoom,
             layout: {
                 'text-field': ['concat', '#', ['get', 'projectId']],
                 'text-font': ['Open Sans Bold'],
@@ -758,7 +763,7 @@
             map.setLayoutProperty('pmtiles-projects-outline', 'visibility', 'none');
             map.setLayoutProperty('project-labels', 'visibility', 'none');
         } else {
-            // Show points (z0-6), PMTiles polygons (z6+), and labels (minzoom: 6)
+            // Show points (low zoom), PMTiles polygons + labels (projectPolygonZoom+)
             map.setLayoutProperty('project-points', 'visibility', 'visible');
             map.setLayoutProperty('pmtiles-projects-fill', 'visibility', 'visible');
             map.setLayoutProperty('pmtiles-projects-outline', 'visibility', 'visible');

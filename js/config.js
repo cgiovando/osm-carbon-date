@@ -9,6 +9,7 @@ const CONFIG = {
         zoom: 2,
         minZoomForImageryFetch: 12, // Minimum zoom to fetch new imagery metadata (ESRI limit)
         minZoomForImageryDisplay: 8, // Minimum zoom to display cached imagery metadata
+        projectPolygonZoom: 8, // Handoff: points below this zoom, project polygons + labels at/above
         recentProjectsLimit: 100 // Number of recent TM projects to load
     },
 
