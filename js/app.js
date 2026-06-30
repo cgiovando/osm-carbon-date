@@ -504,25 +504,16 @@
             OamSource.deselectFeature(map);
         });
 
-        // Click on imagery for popup
-        map.on('click', 'imagery-fill', onImageryClick);
-        map.on('mouseenter', 'imagery-fill', () => {
-            map.getCanvas().style.cursor = 'pointer';
-        });
-        map.on('mouseleave', 'imagery-fill', () => {
-            map.getCanvas().style.cursor = '';
-        });
+        // Single unified click handler for all modes (see onMapClick). Selecting
+        // is resolved to the smallest feature under the cursor so a large project
+        // or mosaic never blocks the smaller ones beneath it.
+        map.on('click', onMapClick);
 
-        // OAM click handling is unified in onMapClickWhenOam (registered below),
-        // so a click on a footprint, on the background, or on a TM polygon in a
-        // gap between footprints all behave predictably.
-        map.on('click', onMapClickWhenOam);
-        map.on('mouseenter', 'oam-footprints-fill', () => {
-            map.getCanvas().style.cursor = 'pointer';
-        });
-        map.on('mouseleave', 'oam-footprints-fill', () => {
-            map.getCanvas().style.cursor = '';
-        });
+        // Pointer cursor over any clickable feature
+        for (const layerId of ['imagery-fill', 'oam-footprints-fill', 'tm-project-fill', 'pmtiles-projects-fill']) {
+            map.on('mouseenter', layerId, () => { map.getCanvas().style.cursor = 'pointer'; });
+            map.on('mouseleave', layerId, () => { map.getCanvas().style.cursor = ''; });
+        }
 
         // Handle failed image sources (404 thumbnails)
         map.on('error', (e) => {
@@ -530,24 +521,6 @@
                 console.debug('Removing failed thumbnail:', e.sourceId);
                 OamSource._removeThumbnail(map, e.sourceId);
             }
-        });
-
-        // Click on TM project
-        map.on('click', 'tm-project-fill', onTmProjectClick);
-        map.on('mouseenter', 'tm-project-fill', () => {
-            map.getCanvas().style.cursor = 'pointer';
-        });
-        map.on('mouseleave', 'tm-project-fill', () => {
-            map.getCanvas().style.cursor = '';
-        });
-
-        // Click on PMTiles project polygons
-        map.on('click', 'pmtiles-projects-fill', onPmtilesProjectClick);
-        map.on('mouseenter', 'pmtiles-projects-fill', () => {
-            map.getCanvas().style.cursor = 'pointer';
-        });
-        map.on('mouseleave', 'pmtiles-projects-fill', () => {
-            map.getCanvas().style.cursor = '';
         });
 
         // Hash change listener
@@ -674,25 +647,6 @@
         // PMTiles source handles rendering of all project geometries
         // No additional GeoJSON source needed
         console.log('Recent projects will be displayed via PMTiles');
-    }
-
-    /**
-     * Handle click on PMTiles project polygon
-     */
-    function onPmtilesProjectClick(e) {
-        // In OAM mode, clicks are dispatched by onMapClickWhenOam to avoid double-handling.
-        if (oamEnabled) return;
-        if (!e.features || e.features.length === 0) return;
-
-        const feature = e.features[0];
-        const props = feature.properties;
-
-        // PMTiles features have projectId in properties
-        const projectId = props.projectId || props.id;
-        if (projectId) {
-            tmProjectInput.value = projectId;
-            loadTmProject();
-        }
     }
 
     /**
@@ -1196,30 +1150,31 @@
     }
 
     /**
-     * Unified click dispatch while OAM is the active imagery source.
+     * Single click handler for every imagery mode.
      *
-     * Dense areas stack a large mosaic, several smaller OAM footprints, and TM
-     * project polygons on the same spot. Picking the first hit always lands on
-     * the biggest one, so the others (and the projects underneath) are
-     * unreachable. Instead we collect every OAM footprint and TM project under
-     * the cursor and select the SMALLEST by area — the most specific thing the
-     * user is pointing at. Clicking empty space clears the selection.
+     * Dense areas stack a large mosaic/project and several smaller OAM footprints
+     * and TM projects on the same spot. Picking the first hit always lands on the
+     * biggest one, so the others underneath are unreachable. Instead we collect
+     * every OAM footprint (OAM mode) and TM project under the cursor and select
+     * the SMALLEST by area — the most specific thing the user is pointing at.
+     * If nothing selectable is hit, we clear any OAM selection and fall back to
+     * the ESRI imagery-date popup.
      */
-    function onMapClickWhenOam(e) {
-        if (!oamEnabled) return; // ESRI/none mode handled by the layer-scoped handlers
-
+    function onMapClick(e) {
         const candidates = [];
 
-        // OAM footprints (true area from each footprint's bbox)
-        const oamHits = map.queryRenderedFeatures(e.point, { layers: ['oam-footprints-fill'] });
-        const seenOam = new Set();
-        for (const h of oamHits) {
-            const id = h.properties._oamId;
-            if (seenOam.has(id)) continue;
-            seenOam.add(id);
-            const feature = oamFeatures.find(f => f.properties._oamId === id);
-            if (feature) {
-                candidates.push({ type: 'oam', feature, areaKm2: bboxAreaKm2(feature.properties.bbox) });
+        // OAM footprints (OAM mode only) — true area from each footprint's bbox
+        if (oamEnabled) {
+            const oamHits = map.queryRenderedFeatures(e.point, { layers: ['oam-footprints-fill'] });
+            const seenOam = new Set();
+            for (const h of oamHits) {
+                const id = h.properties._oamId;
+                if (seenOam.has(id)) continue;
+                seenOam.add(id);
+                const feature = oamFeatures.find(f => f.properties._oamId === id);
+                if (feature) {
+                    candidates.push({ type: 'oam', feature, areaKm2: bboxAreaKm2(feature.properties.bbox) });
+                }
             }
         }
 
@@ -1235,12 +1190,18 @@
             candidates.push({ type: 'tm', projectId, areaKm2: areaKm2 != null ? areaKm2 : Infinity });
         }
 
-        // Nothing under the cursor → clear any OAM selection ("get out")
+        // Nothing selectable under the cursor
         if (candidates.length === 0) {
+            // Clear any OAM selection ("get out")
             if (selectedOamFeature) {
                 OamSource.deselectFeature(map);
                 selectedOamFeature = null;
                 oamInfoPanel.classList.add('hidden');
+            }
+            // Fall back to the ESRI imagery-date popup
+            if (!oamEnabled && map.getLayer('imagery-fill')) {
+                const imgHits = map.queryRenderedFeatures(e.point, { layers: ['imagery-fill'] });
+                if (imgHits.length) onImageryClick({ features: imgHits, lngLat: e.lngLat });
             }
             return;
         }
@@ -1417,20 +1378,6 @@
             .setLngLat(e.lngLat)
             .setHTML(html)
             .addTo(map);
-    }
-
-    /**
-     * Handle click on TM project
-     */
-    function onTmProjectClick(e) {
-        // In OAM mode, clicks are dispatched by onMapClickWhenOam to avoid double-handling.
-        if (oamEnabled) return;
-        if (!currentProject) return;
-
-        // Show info panel
-        infoTitle.textContent = `TM Project #${currentProject.id}`;
-        infoContent.innerHTML = TmApi.formatProjectInfo(currentProject);
-        infoPanel.classList.remove('hidden');
     }
 
     // Initialize
