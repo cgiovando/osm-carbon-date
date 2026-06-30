@@ -232,13 +232,34 @@
      * Add map layers
      */
     function addMapLayers() {
-        // PMTiles layers - project polygons (efficient at all zoom levels)
+        // Project points (circles) for the low-zoom global overview.
+        // Lightweight alternative to polygons; hidden at z6+ where polygons take over.
+        map.addLayer({
+            id: 'project-points',
+            type: 'circle',
+            source: 'project-centroids',
+            maxzoom: 6,
+            paint: {
+                'circle-radius': [
+                    'interpolate', ['linear'], ['zoom'],
+                    2, 2.5,
+                    6, 5
+                ],
+                'circle-color': '#d73f3f',
+                'circle-opacity': 0.85,
+                'circle-stroke-color': '#ffffff',
+                'circle-stroke-width': 1
+            }
+        });
+
+        // PMTiles layers - project polygons (shown from z6+; points cover z0-6)
         // Fill layer for project areas
         map.addLayer({
             id: 'pmtiles-projects-fill',
             type: 'fill',
             source: 'tm-projects-pmtiles',
             'source-layer': 'projects',
+            minzoom: 6,
             paint: {
                 'fill-color': '#ffffff',
                 'fill-opacity': 0.1
@@ -251,6 +272,7 @@
             type: 'line',
             source: 'tm-projects-pmtiles',
             'source-layer': 'projects',
+            minzoom: 6,
             paint: {
                 'line-color': '#ffffff',
                 'line-width': 1.5,
@@ -561,45 +583,36 @@
     }
 
     /**
-     * Load ALL project centroids from the full GeoJSON file
-     * This ensures deduplicated labels (one per project) for all projects, not just recent 100
+     * Load ALL project centroids from the lightweight summary.
+     * The summary already carries a precomputed `centroid` per project, so no
+     * geometry parsing is needed. These points feed both the deduplicated labels
+     * (one per project) and the low-zoom project points layer.
      */
     async function loadAllProjectCentroids() {
         console.log('Loading all project centroids for labels...');
         try {
-            const url = `${CONFIG.tmApi.s3Base}/all_projects.geojson`;
-            const response = await fetch(url);
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}`);
-            }
-            const geojson = await response.json();
+            const items = await TmApi.fetchProjectsSummary();
 
-            if (geojson.features && geojson.features.length > 0) {
-                projectCentroids = geojson.features
-                    .map(f => {
-                        const centroid = getCentroidFromGeometry(f.geometry);
-                        if (!centroid) return null;
-                        return {
-                            type: 'Feature',
-                            geometry: {
-                                type: 'Point',
-                                coordinates: centroid
-                            },
-                            properties: {
-                                projectId: f.properties.projectId,
-                                name: f.properties.name
-                            }
-                        };
-                    })
-                    .filter(f => f !== null);
+            projectCentroids = items
+                .filter(p => Array.isArray(p.centroid) && p.centroid.length === 2)
+                .map(p => ({
+                    type: 'Feature',
+                    geometry: {
+                        type: 'Point',
+                        coordinates: p.centroid
+                    },
+                    properties: {
+                        projectId: p.id,
+                        name: p.name
+                    }
+                }));
 
-                // Update the map source with centroids
-                map.getSource('project-centroids').setData({
-                    type: 'FeatureCollection',
-                    features: projectCentroids
-                });
-                console.log(`Loaded ${projectCentroids.length} project centroids for labels`);
-            }
+            // Update the map source with centroids
+            map.getSource('project-centroids').setData({
+                type: 'FeatureCollection',
+                features: projectCentroids
+            });
+            console.log(`Loaded ${projectCentroids.length} project centroids for labels`);
         } catch (error) {
             console.error('Error loading project centroids:', error);
         }
@@ -740,11 +753,13 @@
 
         // At zoom 10+ with a selected project, hide PMTiles and show only the selected project boundary
         if (zoom >= 10 && hasSelectedProject) {
+            map.setLayoutProperty('project-points', 'visibility', 'none');
             map.setLayoutProperty('pmtiles-projects-fill', 'visibility', 'none');
             map.setLayoutProperty('pmtiles-projects-outline', 'visibility', 'none');
             map.setLayoutProperty('project-labels', 'visibility', 'none');
         } else {
-            // Show PMTiles polygons and labels (labels have minzoom: 6)
+            // Show points (z0-6), PMTiles polygons (z6+), and labels (minzoom: 6)
+            map.setLayoutProperty('project-points', 'visibility', 'visible');
             map.setLayoutProperty('pmtiles-projects-fill', 'visibility', 'visible');
             map.setLayoutProperty('pmtiles-projects-outline', 'visibility', 'visible');
             map.setLayoutProperty('project-labels', 'visibility', 'visible');
@@ -1255,6 +1270,7 @@
         map.setLayoutProperty('tm-project-fill', 'visibility', visibility);
         map.setLayoutProperty('tm-project-outline', 'visibility', visibility);
         map.setLayoutProperty('tm-project-outline-dash', 'visibility', visibility);
+        map.setLayoutProperty('project-points', 'visibility', visibility);
         map.setLayoutProperty('pmtiles-projects-fill', 'visibility', visibility);
         map.setLayoutProperty('pmtiles-projects-outline', 'visibility', visibility);
         map.setLayoutProperty('project-labels', 'visibility', visibility);

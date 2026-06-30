@@ -7,6 +7,7 @@ const TmApi = {
     // Simple in-memory cache for project data
     _cache: new Map(),
     _cacheTimeout: 5 * 60 * 1000, // 5 minutes
+    _summaryPromise: null, // in-flight projects_summary.json request (concurrent-call dedup)
 
     /**
      * Get cached data or null if expired/missing
@@ -28,67 +29,79 @@ const TmApi = {
     },
 
     /**
-     * Fetch recent TM projects from insta-tm all_projects.geojson
-     * @param {number} limit - Number of projects to fetch
-     * @returns {Promise<Object>} Object with projects array and mapResults GeoJSON
+     * Fetch the lightweight projects summary from insta-tm.
+     * This is a ~5MB file (vs the ~570MB all_projects.geojson) containing one
+     * lean record per project: id, name, status, centroid, created, etc.
+     * Cached and reused for both the sidebar list and the label/point centroids.
+     * @returns {Promise<Array>} Array of summary project records
      */
-    async fetchRecentProjects(limit = 100) {
-        const cacheKey = `projects-${limit}`;
+    async fetchProjectsSummary() {
+        const cacheKey = 'summary';
         const cached = this._getCache(cacheKey);
         if (cached) return cached;
 
-        console.log(`Fetching recent TM projects from insta-tm (target: ${limit})...`);
+        // Dedupe concurrent callers (sidebar + centroids both load at startup):
+        // reuse the in-flight request instead of firing a second fetch.
+        if (this._summaryPromise) return this._summaryPromise;
 
-        const url = `${CONFIG.tmApi.s3Base}/all_projects.geojson`;
+        console.log('Fetching projects summary from insta-tm...');
 
-        try {
-            const response = await fetch(url, {
-                method: 'GET',
-                headers: { 'Accept': 'application/json' }
-            });
+        const url = `${CONFIG.tmApi.s3Base}/projects_summary.json`;
 
-            if (!response.ok) {
-                throw new Error(`Failed to fetch projects: ${response.status}`);
+        this._summaryPromise = (async () => {
+            try {
+                const response = await fetch(url, {
+                    method: 'GET',
+                    headers: { 'Accept': 'application/json' }
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch projects summary: ${response.status}`);
+                }
+
+                const json = await response.json();
+                const items = json.projects || [];
+                console.log(`Loaded ${items.length} projects from summary`);
+                this._setCache(cacheKey, items);
+                return items;
+            } catch (error) {
+                console.error('Failed to fetch projects summary from insta-tm:', error);
+                throw error;
+            } finally {
+                // Clear the in-flight handle; further reads come from the TTL cache.
+                this._summaryPromise = null;
             }
+        })();
 
-            const geojson = await response.json();
+        return this._summaryPromise;
+    },
 
-            // Sort features by lastUpdated descending and take the limit
-            const sortedFeatures = (geojson.features || [])
-                .filter(f => f.properties?.lastUpdated)
-                .sort((a, b) => {
-                    const dateA = new Date(a.properties.lastUpdated);
-                    const dateB = new Date(b.properties.lastUpdated);
-                    return dateB - dateA;
-                })
-                .slice(0, limit);
+    /**
+     * Fetch recent TM projects for the sidebar list.
+     * Uses the lightweight summary (see fetchProjectsSummary).
+     * @param {number} limit - Number of projects to fetch
+     * @returns {Promise<Object>} Object with projects array
+     */
+    async fetchRecentProjects(limit = 100) {
+        const items = await this.fetchProjectsSummary();
 
-            // Extract project list for sidebar
-            const projects = sortedFeatures.map(f => ({
-                projectId: f.properties.projectId,
-                name: f.properties.name,
-                status: f.properties.status,
-                percentMapped: f.properties.percentMapped,
-                percentValidated: f.properties.percentValidated,
-                lastUpdated: f.properties.lastUpdated
+        // NOTE: the summary currently lacks `lastUpdated`, so we sort by `created`
+        // as a placeholder. Swap to `lastUpdated` once insta-tm adds it to the
+        // summary (see insta-tm-request-lastUpdated.md).
+        const projects = items
+            .filter(p => p.created)
+            .sort((a, b) => new Date(b.created) - new Date(a.created))
+            .slice(0, limit)
+            .map(p => ({
+                projectId: p.id,
+                name: p.name,
+                status: p.status,
+                percentMapped: p.pctMapped,
+                percentValidated: p.pctValidated,
+                lastUpdated: p.created // placeholder until summary carries lastUpdated
             }));
 
-            // Create GeoJSON for map display
-            const mapResults = {
-                type: 'FeatureCollection',
-                features: sortedFeatures
-            };
-
-            console.log(`Loaded ${projects.length} recent projects from insta-tm`);
-
-            const result = { projects, mapResults };
-            this._setCache(cacheKey, result);
-            return result;
-
-        } catch (error) {
-            console.error('Failed to fetch projects from insta-tm:', error);
-            throw error;
-        }
+        return { projects };
     },
 
     /**
