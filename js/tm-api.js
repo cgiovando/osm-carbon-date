@@ -85,12 +85,11 @@ const TmApi = {
     async fetchRecentProjects(limit = 100) {
         const items = await this.fetchProjectsSummary();
 
-        // NOTE: the summary currently lacks `lastUpdated`, so we sort by `created`
-        // as a placeholder. Swap to `lastUpdated` once insta-tm adds it to the
-        // summary (see insta-tm-request-lastUpdated.md).
+        // Sort by lastUpdated (most recently active first) so "recent" means
+        // recently worked on, not recently created.
         const projects = items
-            .filter(p => p.created)
-            .sort((a, b) => new Date(b.created) - new Date(a.created))
+            .filter(p => p.lastUpdated)
+            .sort((a, b) => new Date(b.lastUpdated) - new Date(a.lastUpdated))
             .slice(0, limit)
             .map(p => ({
                 projectId: p.id,
@@ -98,7 +97,7 @@ const TmApi = {
                 status: p.status,
                 percentMapped: p.pctMapped,
                 percentValidated: p.pctValidated,
-                lastUpdated: p.created // placeholder until summary carries lastUpdated
+                lastUpdated: p.lastUpdated
             }));
 
         return { projects };
