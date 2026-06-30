@@ -494,10 +494,9 @@
         imagerySourceSelect.addEventListener('change', changeImagerySource);
         showTmProjects.addEventListener('change', toggleTmLayer);
 
-        // Close info panel
-        closeInfoBtn.addEventListener('click', () => {
-            infoPanel.classList.add('hidden');
-        });
+        // Close info panel = deselect the TM project (restores browse polygons
+        // so another project can be selected)
+        closeInfoBtn.addEventListener('click', deselectTmProject);
 
         // Close OAM info panel
         closeOamInfoBtn.addEventListener('click', () => {
@@ -694,6 +693,28 @@
             tmProjectInput.value = projectId;
             loadTmProject();
         }
+    }
+
+    /**
+     * Deselect the current TM project: clear the highlighted boundary, hide the
+     * info panel, drop the URL param, and restore the browse polygons/points so
+     * another project can be selected.
+     */
+    function deselectTmProject() {
+        currentProject = null;
+        infoPanel.classList.add('hidden');
+
+        if (map.getSource('tm-project')) {
+            map.getSource('tm-project').setData({ type: 'FeatureCollection', features: [] });
+        }
+
+        // Drop ?project= from the URL
+        const url = new URL(window.location);
+        url.searchParams.delete('project');
+        window.history.replaceState({}, '', url);
+
+        // Restore browse polygons/points (hidden while a project is selected at z10+)
+        updateProjectLayerVisibility();
     }
 
     /**
